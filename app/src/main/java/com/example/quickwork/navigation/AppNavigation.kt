@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import com.example.quickwork.ui.screens.AddJobScreen
 import com.example.quickwork.ui.screens.CheckNotificationScreen
 import com.example.quickwork.ui.screens.HiringScreen
 import com.example.quickwork.ui.screens.JobDetailScreen
@@ -19,12 +20,15 @@ import com.example.quickwork.ui.screens.SearchScreen
 fun SetupNavGraph(navController: NavHostController) {
     NavHost(
         navController = navController,
-        startDestination = "register"
+        startDestination = "addJobScreen"
     ) {
         composable("login") { LoginScreen(navController) }
           composable("register") { RegisterScreen(navController) }
-//        composable("profile") { ProfileScreen(navController) }
-             composable("jobList") { JobListScreen(navController) }
+        //composable("profile") { ProfileScreen(navController) }
+        composable("jobList") { JobListScreen(navController) }
+        composable("jobManage") { JobManageScreen(navController) }
+        composable("addJobScreen") { AddJobScreen(navController) }
+
 //        composable("jobDetail") { JobDetailScreen(navController) }
 //        composable("jobManage") { JobManageScreen(navController) }
 //        composable("jobState") { JobStateScreen(navController) }

@@ -1,12 +1,11 @@
 package com.example.quickwork.data.models
 
 data class User(
-    val id: String = "",
+    val uid: String = "",
     val name: String = "",
     val email: String = "",
-    val password: String = "",
     val phone: String = "",
-    val type: UserType = UserType.EMPLOYEE,
+    val userType: UserType = UserType.EMPLOYEE,
 
     // Merged Employee fields
     val education: String = "",

@@ -1,4 +1,10 @@
 package com.example.quickwork.ui.screens
 
-class JobManageScreen {
+import androidx.compose.runtime.Composable
+import androidx.navigation.NavController
+
+@Composable
+fun JobManageScreen (navController: NavController)
+{
+
 }
