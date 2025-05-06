@@ -77,5 +77,8 @@ dependencies {
     implementation ("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.1")
     implementation("androidx.compose.material3:material3:1.2.1") // or latest stable
     implementation("androidx.compose.material3:material3-window-size-class:1.1.2") // optional
+    implementation("io.coil-kt:coil-compose:2.0.0")
+    implementation ("com.jakewharton.threetenabp:threetenabp:1.4.5")
+
 
 }

@@ -10,7 +10,7 @@ data class User(
     // Merged Employee fields
     val education: String = "",
     val languageCertificate: String = "",
-    val jobList: List<EmployeeJob> = emptyList(),
+    val jobList: List<String> = emptyList(),
 
     // Merged Employer fields
     val companyName: String = "",
@@ -21,10 +21,3 @@ data class User(
 enum class UserType {
     EMPLOYER, EMPLOYEE
 }
-
-data class EmployeeJob(
-    val employeeId: String,
-    val jobId: String = "",
-    val date: String = "",
-    val state: String = ""
-)

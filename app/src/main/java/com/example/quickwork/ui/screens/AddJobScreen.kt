@@ -35,8 +35,30 @@ import java.util.regex.Pattern
 // Required imports at the top
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import java.util.Calendar
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.provider.MediaStore
+import android.util.Log
+import android.widget.Toast
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.ImageShader
+import androidx.core.net.toFile
+import androidx.core.net.toUri
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.*
+import java.net.HttpURLConnection
+import java.net.URL
+
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,7 +70,12 @@ fun AddJobScreen(navController: NavController) {
     var jobName by remember { mutableStateOf("") }
     var jobType by remember { mutableStateOf(JobType.PARTTIME) }
     var jobDetail by remember { mutableStateOf("") }
+    var jobBenefit by remember { mutableStateOf("") }
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageUrl by remember { mutableStateOf<String?>(null) }
+
     var salary by remember { mutableStateOf("") }
+    var employeeRequired by remember { mutableStateOf("")}
     var insurance by remember { mutableStateOf("") }
     var workingHoursStart by remember { mutableStateOf("") }
     var workingHoursEnd by remember { mutableStateOf("") }
@@ -70,6 +97,12 @@ fun AddJobScreen(navController: NavController) {
     val timePattern = Pattern.compile("^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$")
     // Date format validation (yyyy-MM-dd)
     val datePattern = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$")
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+        onResult = { uri ->
+            selectedImageUri = uri
+        }
+    )
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -166,6 +199,13 @@ fun AddJobScreen(navController: NavController) {
                         modifier = Modifier.height(120.dp)
                     )
                     InputField(
+                        label = "Job benefit",
+                        value = jobBenefit,
+                        onValueChange = { jobBenefit = it },
+                        singleLine = false,
+                        modifier = Modifier.height(120.dp)
+                    )
+                    InputField(
                         label = "Salary (USD)",
                         value = salary,
                         onValueChange = { if (it.all { char -> char.isDigit() }) salary = it },
@@ -175,6 +215,12 @@ fun AddJobScreen(navController: NavController) {
                         label = "Insurance (USD)",
                         value = insurance,
                         onValueChange = { if (it.all { char -> char.isDigit() }) insurance = it },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    InputField(
+                        label = "Number of employee required",
+                        value = employeeRequired,
+                        onValueChange = { if (it.all { char -> char.isDigit() }) employeeRequired = it },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
 
@@ -273,16 +319,48 @@ fun AddJobScreen(navController: NavController) {
                             .fillMaxWidth()
                             .clickable { showDatePickerEnd = true }
                     )
+                    Button(onClick = { launcher.launch("image/*") }) {
+                        Text("Select Job Image")
+                    }
+
+                    selectedImageUri?.let { uri ->
+                        Image(
+                            bitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, uri).asImageBitmap(),
+                            contentDescription = "Selected Image",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
 
 
                     // Add Job Button
                     Button(
                         onClick = {
                             coroutineScope.launch {
+
                                 if (currentUser == null) {
                                     errorMessage = "You must be logged in to add a job"
                                     return@launch
                                 }
+                                if (selectedImageUri == null) {
+                                    errorMessage = "Please select an image"
+                                    return@launch
+                                }
+
+                                val uploadedUrl = withContext(Dispatchers.IO) {
+                                    uploadImageToCloudinary(context, selectedImageUri!!)
+                                }
+
+                                if (uploadedUrl == null) {
+                                    errorMessage = "Failed to upload image"
+                                    return@launch
+                                }
+
+                                imageUrl = uploadedUrl
+
                                 if (jobName.isBlank() || jobDetail.isBlank() || salary.isBlank() || insurance.isBlank() ||
                                     workingHoursStart.isBlank() || workingHoursEnd.isBlank() || dateStart.isBlank() || dateEnd.isBlank()
                                 ) {
@@ -291,10 +369,12 @@ fun AddJobScreen(navController: NavController) {
                                 }
                                 val salaryInt = salary.toIntOrNull()
                                 val insuranceInt = insurance.toIntOrNull()
-                                if (salaryInt == null || insuranceInt == null) {
-                                    errorMessage = "Salary and Insurance must be valid numbers"
+                                val employeeRequiredInt = employeeRequired.toIntOrNull()
+                                if (salaryInt == null || insuranceInt == null || employeeRequiredInt == null) {
+                                    errorMessage = "Salary and Insurance, Number of employee must be valid numbers"
                                     return@launch
                                 }
+
                                 if (!timePattern.matcher(workingHoursStart).matches() || !timePattern.matcher(workingHoursEnd).matches()) {
                                     errorMessage = "Working hours must be in HH:mm format (e.g., 08:00)"
                                     return@launch
@@ -319,7 +399,11 @@ fun AddJobScreen(navController: NavController) {
                                         workingHoursStart = workingHoursStart,
                                         workingHoursEnd = workingHoursEnd,
                                         dateStart = dateStart,
-                                        dateEnd = dateEnd
+                                        dateEnd = dateEnd,
+                                        employeeRequired = employeeRequiredInt,
+                                        imageUrl = imageUrl!! // <-- Add this field
+
+
                                     )
                                     // Save to Firestore
                                     firestore.collection("jobs")
@@ -327,6 +411,7 @@ fun AddJobScreen(navController: NavController) {
                                         .set(job)
                                         .await()
                                     // Navigate back
+                                    Toast.makeText(context, "Job added successfully!", Toast.LENGTH_SHORT).show()
                                     navController.popBackStack()
                                 } catch (e: Exception) {
                                     errorMessage = e.message ?: "Failed to add job"
@@ -371,7 +456,59 @@ fun AddJobScreen(navController: NavController) {
             }
         }
     }
+}suspend fun uploadImageToCloudinary(context: Context, imageUri: Uri): String? {
+    val cloudName = "dytggtwgy"
+    val uploadPreset = "quickworks"
+    val TAG = "CloudinaryUpload"
+
+    return try {
+        val url = URL("https://api.cloudinary.com/v1_1/$cloudName/image/upload")
+        val boundary = "Boundary-${System.currentTimeMillis()}"
+        val conn = url.openConnection() as HttpURLConnection
+        conn.doOutput = true
+        conn.requestMethod = "POST"
+        conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+
+        val outputStream = DataOutputStream(conn.outputStream)
+        val inputStream = context.contentResolver.openInputStream(imageUri)
+        val fileBytes = inputStream!!.readBytes()
+        inputStream.close()
+
+        Log.d(TAG, "Writing upload_preset...")
+        outputStream.writeBytes("--$boundary\r\n")
+        outputStream.writeBytes("Content-Disposition: form-data; name=\"upload_preset\"\r\n\r\n")
+        outputStream.writeBytes("$uploadPreset\r\n")
+
+        Log.d(TAG, "Writing file data...")
+        outputStream.writeBytes("--$boundary\r\n")
+        outputStream.writeBytes("Content-Disposition: form-data; name=\"file\"; filename=\"image.jpg\"\r\n")
+        outputStream.writeBytes("Content-Type: image/jpeg\r\n\r\n")
+        outputStream.write(fileBytes)
+        outputStream.writeBytes("\r\n--$boundary--\r\n")
+        outputStream.flush()
+        outputStream.close()
+
+        val responseCode = conn.responseCode
+        Log.d(TAG, "Response Code: $responseCode")
+
+        if (responseCode == 200) {
+            val response = conn.inputStream.bufferedReader().use { it.readText() }
+            Log.d(TAG, "Upload success. Response: $response")
+            val imageUrl = Regex("\"url\":\"(.*?)\"").find(response)?.groupValues?.get(1)?.replace("\\/", "/")
+
+            // Ensure the URL starts with https://
+            return imageUrl?.replace("http://", "https://")
+        } else {
+            val errorResponse = conn.errorStream?.bufferedReader()?.use { it.readText() }
+            Log.e(TAG, "Upload failed. Error response: $errorResponse")
+            null
+        }
+    } catch (e: Exception) {
+        Log.e(TAG, "Exception during upload: ${e.message}", e)
+        null
+    }
 }
+
 
 @Composable
 fun InputField(
