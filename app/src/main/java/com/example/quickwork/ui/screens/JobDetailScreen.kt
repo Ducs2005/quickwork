@@ -11,7 +11,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,19 +23,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
-import com.example.quickwork.data.models.AttendanceStatus
-import com.example.quickwork.data.models.Employee
-import com.example.quickwork.data.models.Job
-import com.example.quickwork.data.models.DailyAttendance
-
-import com.example.quickwork.data.models.JobState
-import com.example.quickwork.data.models.JobType
+import com.example.quickwork.data.models.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.tasks.await
 import org.threeten.bp.LocalDate
 import org.threeten.bp.format.DateTimeFormatter
-
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,76 +42,92 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
     var isLoading by remember { mutableStateOf(true) }
     var hasApplied by remember { mutableStateOf(false) }
     var companyName by remember { mutableStateOf("") }
+    var categoryNames by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(jobId) {
-        firestore.collection("jobs")
-            .document(jobId)
-            .get()
-            .addOnSuccessListener { document ->
-                if (document.exists()) {
-                    val baseJob = Job(
-                        id = document.id,
-                        name = document.getString("name") ?: "",
-                        type = JobType.valueOf(document.getString("type") ?: "PARTTIME"),
-                        employerId = document.getString("employerId") ?: "",
-                        detail = document.getString("detail") ?: "",
-                        imageUrl = document.getString("imageUrl") ?: "",
-                        salary = document.getLong("salary")?.toInt() ?: 0,
-                        insurance = document.getLong("insurance")?.toInt() ?: 0,
-                        dateUpload = document.getString("dateUpload") ?: "",
-                        workingHoursStart = document.getString("workingHoursStart") ?: "",
-                        workingHoursEnd = document.getString("workingHoursEnd") ?: "",
-                        dateStart = document.getString("dateStart") ?: "",
-                        dateEnd = document.getString("dateEnd") ?: "",
-                        employees = emptyList(), // We'll load from subcollection
-                        employeeRequired = document.getLong("employeeRequired")?.toInt() ?: 0
-                    )
+        try {
+            // Fetch job details
+            val document = firestore.collection("jobs")
+                .document(jobId)
+                .get()
+                .await()
+            if (document.exists()) {
+                val baseJob = Job(
+                    id = document.id,
+                    name = document.getString("name") ?: "",
+                    type = JobType.valueOf(document.getString("type") ?: "PARTTIME"),
+                    employerId = document.getString("employerId") ?: "",
+                    detail = document.getString("detail") ?: "",
+                    imageUrl = document.getString("imageUrl") ?: "",
+                    salary = document.getLong("salary")?.toInt() ?: 0,
+                    insurance = document.getLong("insurance")?.toInt() ?: 0,
+                    dateUpload = document.getString("dateUpload") ?: "",
+                    workingHoursStart = document.getString("workingHoursStart") ?: "",
+                    workingHoursEnd = document.getString("workingHoursEnd") ?: "",
+                    dateStart = document.getString("dateStart") ?: "",
+                    dateEnd = document.getString("dateEnd") ?: "",
+                    employees = emptyList(),
+                    employeeRequired = document.getLong("employeeRequired")?.toInt() ?: 0,
+                    companyName = document.getString("companyName") ?: "Unknown",
+                    categoryIds = document.get("categoryIds") as? List<String> ?: emptyList()
+                )
 
-                    // Fetch company name from user document
-                    firestore.collection("users")
-                        .document(baseJob.employerId)
-                        .get()
-                        .addOnSuccessListener { userDoc ->
-                            companyName = userDoc.getString("companyName") ?: "Unknown Company"
-                        }
+                // Fetch company name from user document
+                val userDoc = firestore.collection("users")
+                    .document(baseJob.employerId)
+                    .get()
+                    .await()
+                companyName = userDoc.getString("companyName") ?: "Unknown Company"
 
-                    // Fetch employees from subcollection
-                    firestore.collection("jobs")
-                        .document(jobId)
-                        .collection("employees")
-                        .get()
-                        .addOnSuccessListener { employeeDocs ->
-                            val employeeList = employeeDocs.map { empDoc ->
-                                val attendanceList = (empDoc["attendance"] as? List<Map<String, Any>>)?.map { att ->
-                                    DailyAttendance(
-                                        date = att["date"] as? String ?: "",
-                                        status = AttendanceStatus.valueOf(att["status"] as? String ?: "ABSENT")
-                                    )
-                                } ?: emptyList()
-
-                                Employee(
-                                    id = empDoc.getString("id") ?: "",
-                                    jobState = JobState.valueOf(empDoc.getString("jobState") ?: "APPLYING"),
-                                    attendance = attendanceList
-                                )
-                            }
-
-                            job = baseJob.copy(employees = employeeList)
-                            hasApplied = employeeList.any { it.id == userId }
-                            isLoading = false
-                        }
-                        .addOnFailureListener {
-                            Log.e("JobDetailScreen", "Failed to load employees", it)
-                            isLoading = false
-                        }
-                } else {
-                    isLoading = false
+                // Fetch category names
+                val categoryIds = baseJob.categoryIds
+                val fetchedCategoryNames = mutableListOf<String>()
+                for (categoryId in categoryIds) {
+                    try {
+                        val categoryDoc = firestore.collection("category")
+                            .document(categoryId)
+                            .get()
+                            .await()
+                        val categoryName = categoryDoc.getString("name") ?: "Unknown Category"
+                        fetchedCategoryNames.add(categoryName)
+                    } catch (e: Exception) {
+                        Log.w("JobDetailScreen", "Error fetching category $categoryId", e)
+                        fetchedCategoryNames.add("Unknown Category")
+                    }
                 }
-            }
-            .addOnFailureListener {
-                Log.e("JobDetailScreen", "Failed to load job", it)
+                categoryNames = fetchedCategoryNames
+
+                // Fetch employees from subcollection
+                val employeeDocs = firestore.collection("jobs")
+                    .document(jobId)
+                    .collection("employees")
+                    .get()
+                    .await()
+                val employeeList = employeeDocs.map { empDoc ->
+                    val attendanceList = (empDoc["attendance"] as? List<Map<String, Any>>)?.map { att ->
+                        DailyAttendance(
+                            date = att["date"] as? String ?: "",
+                            status = AttendanceStatus.valueOf(att["status"] as? String ?: "ABSENT")
+                        )
+                    } ?: emptyList()
+
+                    Employee(
+                        id = empDoc.getString("id") ?: "",
+                        jobState = JobState.valueOf(empDoc.getString("jobState") ?: "APPLYING"),
+                        attendance = attendanceList
+                    )
+                }
+
+                job = baseJob.copy(employees = employeeList)
+                hasApplied = employeeList.any { it.id == userId }
+                isLoading = false
+            } else {
                 isLoading = false
             }
+        } catch (e: Exception) {
+            Log.e("JobDetailScreen", "Failed to load job", e)
+            isLoading = false
+        }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
@@ -154,7 +163,6 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                             "date" to dateStr,
                             "status" to AttendanceStatus.ABSENT.name
                         )
-                        Log.d("date", "a $dateStr")
                         val attendanceDoc = attendanceRef.document(dateStr)
                         batch.set(attendanceDoc, attendanceData)
                         date = date.plusDays(1)
@@ -164,13 +172,12 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     batch.commit()
                         .addOnSuccessListener {
                             Log.d("JobDetailScreen", "Successfully saved attendance records.")
-
                             // 5. Update local UI
                             job = job!!.copy(
                                 employees = job!!.employees + Employee(
                                     id = userId,
                                     jobState = JobState.APPLYING,
-                                    attendance = emptyList() // You can reload if needed
+                                    attendance = emptyList()
                                 )
                             )
                             hasApplied = true
@@ -183,11 +190,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     Log.e("JobDetailScreen", "Failed to apply for job", e)
                 }
         }
-
-
     }
-
-
 
     Scaffold(
         topBar = {
@@ -202,8 +205,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     }
                 }
             )
-        },
-
+        }
     ) { innerPadding ->
         if (isLoading) {
             Box(
@@ -211,7 +213,6 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     .padding(innerPadding)
                     .fillMaxSize(),
                 contentAlignment = Alignment.Center
-
             ) {
                 CircularProgressIndicator()
             }
@@ -286,6 +287,14 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    // Categories
+                    Text(
+                        text = "Categories: ${if (categoryNames.isEmpty()) "None" else categoryNames.joinToString(", ")}",
+                        fontSize = 14.sp,
+                        color = Color.DarkGray
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     // Employee Status
                     Text(
                         text = "Employees: ${job!!.employees.size}/${job!!.employeeRequired} applied",
@@ -296,15 +305,11 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Apply Button
-                    //if (!isEmployer && !hasApplied && !isFull) {
-                    if ( !hasApplied && !isFull) { //test
-
-                            Log.e("if result", " result")
+                    if (!hasApplied && !isFull) {
                         Button(
                             onClick = { applyForJob() },
                             modifier = Modifier
                                 .fillMaxWidth()
-
                                 .padding(vertical = 8.dp),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF1976D2),
@@ -333,7 +338,6 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                             modifier = Modifier.padding(vertical = 8.dp)
                         )
                     }
-
 
                     // Salary and Insurance
                     Text(
@@ -372,12 +376,12 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    // Company Name
                     Text(
                         text = "Company: $companyName",
                         fontSize = 14.sp,
                         color = Color.DarkGray
                     )
-
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Job Detail
@@ -394,10 +398,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-
-
                 }
-
             }
         }
     }

@@ -20,6 +20,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.ktx.firestore
+import com.google.firebase.ktx.Firebase
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -118,9 +120,20 @@ fun LoginScreen(navController: NavController) {
                                 try {
                                     // Sign in with Firebase Auth
                                     val authResult = auth.signInWithEmailAndPassword(email, password).await()
-                                    if (authResult.user != null) {
-                                        // Navigate to home screen or dashboard
-                                        navController.navigate("home") {
+                                    val user = authResult.user
+                                    if (user != null) {
+                                        // Fetch user role from Firestore
+                                        val userDoc = Firebase
+                                            .firestore
+                                            .collection("users")
+                                            .document(user.uid)
+                                            .get()
+                                            .await()
+
+                                        val isRecruiter = userDoc.getString("userType") == "EMPLOYER"
+                                        val destination = if (isRecruiter) "jobManage" else "jobList"
+
+                                        navController.navigate(destination) {
                                             popUpTo(navController.graph.startDestinationId) {
                                                 inclusive = true
                                             }
@@ -128,21 +141,18 @@ fun LoginScreen(navController: NavController) {
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    errorMessage = when (e.message?.contains("INVALID_EMAIL")) {
-                                        true -> "Invalid email format"
-                                        false -> when {
-                                            e.message?.contains("INVALID_LOGIN_CREDENTIALS") == true -> "Incorrect email or password"
-                                            e.message?.contains("TOO_MANY_ATTEMPTS") == true -> "Too many attempts, try again later"
-                                            else -> e.message ?: "Login failed"
-                                        }
-
-                                        null -> TODO()
+                                    errorMessage = when {
+                                        e.message?.contains("INVALID_EMAIL") == true -> "Invalid email format"
+                                        e.message?.contains("INVALID_LOGIN_CREDENTIALS") == true -> "Incorrect email or password"
+                                        e.message?.contains("TOO_MANY_ATTEMPTS") == true -> "Too many attempts, try again later"
+                                        else -> e.message ?: "Login failed"
                                     }
                                 } finally {
                                     isLoading = false
                                 }
                             }
                         },
+
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF81C784)),
                         modifier = Modifier

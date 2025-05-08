@@ -16,6 +16,8 @@ data class Job(
     val dateEnd: String = "" ,            // ví dụ: "2025-06-30"
     val employees: List<Employee> = emptyList(),
     val employeeRequired: Int,
+    val companyName : String = "Unknow",
+    val categoryIds : List<String> = emptyList()
 )
 
 
@@ -34,7 +36,7 @@ data class Employee(
     val attendance: List<DailyAttendance> = emptyList()
 )
 enum class JobState {
-    APPLYING, WAITNG, WORKING, ENDED
+    APPLYING, PRESENT, WORKING, ENDED, DENIED
 }
 enum class JobType {
     FULLTIME, PARTTIME

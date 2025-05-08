@@ -92,7 +92,7 @@ fun JobListScreen(navController: NavController) {
     }
 
     Scaffold(
-        topBar = { Header() },
+        topBar = { Header(navController) },
         bottomBar = { BottomNavigation(navController) },
 
     ) { innerPadding ->

@@ -1,14 +1,26 @@
 package com.example.quickwork.ui.screens
 
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.Context
+import android.net.Uri
 import android.os.Build
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material3.*
@@ -17,6 +29,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -26,39 +40,23 @@ import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import java.text.SimpleDateFormat
-import java.time.LocalDate
-import java.util.*
-import java.util.regex.Pattern
-// Required imports at the top
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
-import android.content.Context
-import androidx.compose.ui.platform.LocalContext
-import java.util.Calendar
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import android.provider.MediaStore
-import android.util.Log
-import android.widget.Toast
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.foundation.Image
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.ImageShader
-import androidx.core.net.toFile
-import androidx.core.net.toUri
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.*
+import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.SimpleDateFormat
+import java.util.*
+import java.util.Calendar
+import java.util.regex.Pattern
 
+// Data class for categories
+data class Category(
+    val id: String = "",
+    val name: String = ""
+)
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,9 +71,8 @@ fun AddJobScreen(navController: NavController) {
     var jobBenefit by remember { mutableStateOf("") }
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var imageUrl by remember { mutableStateOf<String?>(null) }
-
     var salary by remember { mutableStateOf("") }
-    var employeeRequired by remember { mutableStateOf("")}
+    var employeeRequired by remember { mutableStateOf("") }
     var insurance by remember { mutableStateOf("") }
     var workingHoursStart by remember { mutableStateOf("") }
     var workingHoursEnd by remember { mutableStateOf("") }
@@ -84,6 +81,8 @@ fun AddJobScreen(navController: NavController) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) } // For JobType dropdown
+    var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
+    var selectedCategoryIds by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val coroutineScope = rememberCoroutineScope()
     val auth = FirebaseAuth.getInstance()
@@ -99,10 +98,28 @@ fun AddJobScreen(navController: NavController) {
     val datePattern = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$")
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
-        onResult = { uri ->
-            selectedImageUri = uri
-        }
+        onResult = { uri -> selectedImageUri = uri }
     )
+
+    // Fetch categories from Firestore
+    LaunchedEffect(Unit) {
+        try {
+            val querySnapshot = firestore.collection("category").get().await()
+            categories = querySnapshot.documents.mapNotNull { doc ->
+                try {
+                    Category(
+                        id = doc.id,
+                        name = doc.getString("name") ?: ""
+                    )
+                } catch (e: Exception) {
+                    Log.w("AddJobScreen", "Error parsing category ${doc.id}", e)
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AddJobScreen", "Failed to load categories", e)
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -168,7 +185,7 @@ fun AddJobScreen(navController: NavController) {
                             trailingIcon = {
                                 IconButton(onClick = { expanded = !expanded }) {
                                     Icon(
-                                        imageVector = if (expanded) androidx.compose.material.icons.Icons.Default.ArrowDropUp else androidx.compose.material.icons.Icons.Default.ArrowDropDown,
+                                        imageVector = if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                                         contentDescription = "Toggle dropdown"
                                     )
                                 }
@@ -191,6 +208,44 @@ fun AddJobScreen(navController: NavController) {
                         }
                     }
 
+                    // Category Selection
+                    Text(
+                        text = "Select Categories:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray
+                    )
+                    if (categories.isEmpty()) {
+                        Text(
+                            text = "Loading categories...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
+                    } else {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            items(categories) { category ->
+                                FilterChip(
+                                    selected = selectedCategoryIds.contains(category.id),
+                                    onClick = {
+                                        selectedCategoryIds = if (selectedCategoryIds.contains(category.id)) {
+                                            selectedCategoryIds - category.id
+                                        } else {
+                                            selectedCategoryIds + category.id
+                                        }
+                                    },
+                                    label = { Text(category.name) },
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                        selectedLabelColor = Color.White
+                                    )
+                                )
+                            }
+                        }
+                    }
+
                     InputField(
                         label = "Job Details",
                         value = jobDetail,
@@ -199,7 +254,7 @@ fun AddJobScreen(navController: NavController) {
                         modifier = Modifier.height(120.dp)
                     )
                     InputField(
-                        label = "Job benefit",
+                        label = "Job Benefit",
                         value = jobBenefit,
                         onValueChange = { jobBenefit = it },
                         singleLine = false,
@@ -218,7 +273,7 @@ fun AddJobScreen(navController: NavController) {
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                     InputField(
-                        label = "Number of employee required",
+                        label = "Number of Employees Required",
                         value = employeeRequired,
                         onValueChange = { if (it.all { char -> char.isDigit() }) employeeRequired = it },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
@@ -226,7 +281,7 @@ fun AddJobScreen(navController: NavController) {
 
                     val context = LocalContext.current
 
-// Working Hours Start Picker
+                    // Working Hours Start Picker
                     var showTimePickerStart by remember { mutableStateOf(false) }
                     if (showTimePickerStart) {
                         TimePickerDialog(
@@ -245,10 +300,11 @@ fun AddJobScreen(navController: NavController) {
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showTimePickerStart = true }
+                            .clickable { showTimePickerStart = true },
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-// Working Hours End Picker
+                    // Working Hours End Picker
                     var showTimePickerEnd by remember { mutableStateOf(false) }
                     if (showTimePickerEnd) {
                         TimePickerDialog(
@@ -267,10 +323,11 @@ fun AddJobScreen(navController: NavController) {
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showTimePickerEnd = true }
+                            .clickable { showTimePickerEnd = true },
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-// Date Start Picker
+                    // Date Start Picker
                     var showDatePickerStart by remember { mutableStateOf(false) }
                     if (showDatePickerStart) {
                         val calendar = Calendar.getInstance()
@@ -292,10 +349,11 @@ fun AddJobScreen(navController: NavController) {
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showDatePickerStart = true }
+                            .clickable { showDatePickerStart = true },
+                        shape = RoundedCornerShape(12.dp)
                     )
 
-// Date End Picker
+                    // Date End Picker
                     var showDatePickerEnd by remember { mutableStateOf(false) }
                     if (showDatePickerEnd) {
                         val calendar = Calendar.getInstance()
@@ -317,15 +375,17 @@ fun AddJobScreen(navController: NavController) {
                         readOnly = true,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { showDatePickerEnd = true }
+                            .clickable { showDatePickerEnd = true },
+                        shape = RoundedCornerShape(12.dp)
                     )
+
+                    // Image Selection
                     Button(onClick = { launcher.launch("image/*") }) {
                         Text("Select Job Image")
                     }
-
                     selectedImageUri?.let { uri ->
                         Image(
-                            bitmap = MediaStore.Images.Media.getBitmap(context.contentResolver, uri).asImageBitmap(),
+                            bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri).asImageBitmap(),
                             contentDescription = "Selected Image",
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -335,18 +395,20 @@ fun AddJobScreen(navController: NavController) {
                         )
                     }
 
-
                     // Add Job Button
                     Button(
                         onClick = {
                             coroutineScope.launch {
-
                                 if (currentUser == null) {
                                     errorMessage = "You must be logged in to add a job"
                                     return@launch
                                 }
                                 if (selectedImageUri == null) {
                                     errorMessage = "Please select an image"
+                                    return@launch
+                                }
+                                if (selectedCategoryIds.isEmpty()) {
+                                    errorMessage = "Please select at least one category"
                                     return@launch
                                 }
 
@@ -362,7 +424,8 @@ fun AddJobScreen(navController: NavController) {
                                 imageUrl = uploadedUrl
 
                                 if (jobName.isBlank() || jobDetail.isBlank() || salary.isBlank() || insurance.isBlank() ||
-                                    workingHoursStart.isBlank() || workingHoursEnd.isBlank() || dateStart.isBlank() || dateEnd.isBlank()
+                                    workingHoursStart.isBlank() || workingHoursEnd.isBlank() || dateStart.isBlank() ||
+                                    dateEnd.isBlank() || employeeRequired.isBlank()
                                 ) {
                                     errorMessage = "Please fill in all fields"
                                     return@launch
@@ -371,7 +434,7 @@ fun AddJobScreen(navController: NavController) {
                                 val insuranceInt = insurance.toIntOrNull()
                                 val employeeRequiredInt = employeeRequired.toIntOrNull()
                                 if (salaryInt == null || insuranceInt == null || employeeRequiredInt == null) {
-                                    errorMessage = "Salary and Insurance, Number of employee must be valid numbers"
+                                    errorMessage = "Salary, Insurance, and Number of Employees must be valid numbers"
                                     return@launch
                                 }
 
@@ -401,9 +464,9 @@ fun AddJobScreen(navController: NavController) {
                                         dateStart = dateStart,
                                         dateEnd = dateEnd,
                                         employeeRequired = employeeRequiredInt,
-                                        imageUrl = imageUrl!! // <-- Add this field
-
-
+                                        imageUrl = imageUrl!!,
+                                        companyName = currentUser.displayName ?: "Unknown",
+                                        categoryIds = selectedCategoryIds
                                     )
                                     // Save to Firestore
                                     firestore.collection("jobs")
@@ -456,7 +519,9 @@ fun AddJobScreen(navController: NavController) {
             }
         }
     }
-}suspend fun uploadImageToCloudinary(context: Context, imageUri: Uri): String? {
+}
+
+suspend fun uploadImageToCloudinary(context: Context, imageUri: Uri): String? {
     val cloudName = "dytggtwgy"
     val uploadPreset = "quickworks"
     val TAG = "CloudinaryUpload"
@@ -495,8 +560,6 @@ fun AddJobScreen(navController: NavController) {
             val response = conn.inputStream.bufferedReader().use { it.readText() }
             Log.d(TAG, "Upload success. Response: $response")
             val imageUrl = Regex("\"url\":\"(.*?)\"").find(response)?.groupValues?.get(1)?.replace("\\/", "/")
-
-            // Ensure the URL starts with https://
             return imageUrl?.replace("http://", "https://")
         } else {
             val errorResponse = conn.errorStream?.bufferedReader()?.use { it.readText() }
@@ -508,7 +571,6 @@ fun AddJobScreen(navController: NavController) {
         null
     }
 }
-
 
 @Composable
 fun InputField(

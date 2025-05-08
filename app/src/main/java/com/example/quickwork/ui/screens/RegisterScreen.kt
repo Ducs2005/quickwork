@@ -23,6 +23,7 @@ import androidx.navigation.NavController
 import com.example.quickwork.data.models.User
 import com.example.quickwork.data.models.UserType
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -176,6 +177,12 @@ fun RegisterScreen(navController: NavController) {
                                     val authResult = auth.createUserWithEmailAndPassword(email, password).await()
                                     val firebaseUser = authResult.user
                                     if (firebaseUser != null) {
+                                        // Update Firebase user profile with displayName
+                                        val profileUpdates = UserProfileChangeRequest.Builder()
+                                            .setDisplayName(name)
+                                            .build()
+                                        firebaseUser.updateProfile(profileUpdates).await()
+
                                         // Create User object
                                         val user = User(
                                             uid = firebaseUser.uid,
@@ -190,24 +197,22 @@ fun RegisterScreen(navController: NavController) {
 
                                         // Save to Firestore
                                         firestore.collection("users")
-                                                .document(firebaseUser.uid)
-                                                .set(user)
-                                                .await()
-                                        // Navigate to login or home screen
-                                        if (userType == UserType.EMPLOYEE)
-                                        {
+                                            .document(firebaseUser.uid)
+                                            .set(user)
+                                            .await()
+
+                                        // Navigate to appropriate screen based on user type
+                                        if (userType == UserType.EMPLOYEE) {
                                             navController.navigate("jobList") {
                                                 popUpTo(navController.graph.startDestinationId)
                                                 launchSingleTop = true
                                             }
-                                        }
-                                        else{
+                                        } else {
                                             navController.navigate("jobManage") {
                                                 popUpTo(navController.graph.startDestinationId)
                                                 launchSingleTop = true
                                             }
                                         }
-
                                     }
                                 } catch (e: Exception) {
                                     errorMessage = e.message ?: "Registration failed"

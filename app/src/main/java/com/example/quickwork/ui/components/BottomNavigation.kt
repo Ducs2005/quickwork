@@ -44,11 +44,11 @@ fun BottomNavigation(navController: NavController) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             val navItems = listOf(
-                BottomNavItem("Trang Chủ", R.drawable.ic_home, "home"),
-                BottomNavItem("Hồ Sơ", R.drawable.ic_part_time_job, "profile"),
-                BottomNavItem("Tiện Ích", R.drawable.ic_utilities, "utilities"),
+                BottomNavItem("Trang Chủ", R.drawable.ic_home, "jobList"),
+                BottomNavItem("Hồ Sơ", R.drawable.ic_part_time_job, "jobState"),
+                BottomNavItem("Lịch trình", R.drawable.ic_utilities, "schedule"),
                 BottomNavItem("Chat", R.drawable.ic_chat, "chat"),
-                BottomNavItem("Menu", R.drawable.ic_menu, "menu")
+                BottomNavItem("Menu", R.drawable.ic_menu, "setting")
             )
 
             navItems.forEach { item ->
