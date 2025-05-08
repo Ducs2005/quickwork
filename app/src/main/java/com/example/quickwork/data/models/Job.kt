@@ -17,7 +17,8 @@ data class Job(
     val employees: List<Employee> = emptyList(),
     val employeeRequired: Int,
     val companyName : String = "Unknow",
-    val categoryIds : List<String> = emptyList()
+    val categoryIds : List<String> = emptyList(),
+    val attendanceCode : String? = null
 )
 
 

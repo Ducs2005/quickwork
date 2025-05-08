@@ -2,6 +2,8 @@ package com.example.quickwork.ui.screens
 
 import android.os.Build
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -17,16 +19,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
+import com.example.quickwork.ScanActivity
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.WeekFields
 import java.util.*
@@ -42,6 +48,9 @@ fun ScheduleScreen(navController: NavController) {
     var jobs by remember { mutableStateOf<List<Job>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var currentWeekStart by remember { mutableStateOf(LocalDate.now().with(WeekFields.ISO.firstDayOfWeek)) }
+    var scanResult by remember { mutableStateOf<String?>(null) }
+    var scanFeedback by remember { mutableStateOf<String?>(null) }
+    var selectedJob by remember { mutableStateOf<Job?>(null) }
 
     // Formatter for parsing and displaying dates
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
@@ -77,8 +86,7 @@ fun ScheduleScreen(navController: NavController) {
                                             jobDoc.getString("type")?.let { enumValueOf<JobType>(it) } ?: JobType.PARTTIME
                                         } catch (e: IllegalArgumentException) {
                                             JobType.PARTTIME
-                                        }
-                                        ,
+                                        },
                                         employerId = jobDoc.getString("employerId") ?: "",
                                         detail = jobDoc.getString("detail") ?: "",
                                         imageUrl = jobDoc.getString("imageUrl") ?: "",
@@ -89,9 +97,11 @@ fun ScheduleScreen(navController: NavController) {
                                         workingHoursEnd = jobDoc.getString("workingHoursEnd") ?: "",
                                         dateStart = jobDoc.getString("dateStart") ?: "",
                                         dateEnd = jobDoc.getString("dateEnd") ?: "",
-                                        employees = emptyList(), // Not needed for schedule
+                                        employees = emptyList(),
                                         employeeRequired = jobDoc.getLong("employeeRequired")?.toInt() ?: 0,
-                                        companyName = jobDoc.getString("companyName") ?: "Unknown"
+                                        companyName = jobDoc.getString("companyName") ?: "Unknown",
+                                        categoryIds = jobDoc.get("categoryIds") as? List<String> ?: emptyList(),
+                                        attendanceCode = jobDoc.getString("attendanceCode")
                                     )
                                 )
                             }
@@ -108,6 +118,47 @@ fun ScheduleScreen(navController: NavController) {
             }
         } else {
             isLoading = false
+        }
+    }
+
+    // Process QR scan result
+    LaunchedEffect(scanResult, selectedJob) {
+        if (scanResult != null && selectedJob != null) {
+            if (scanResult == selectedJob!!.attendanceCode) {
+                try {
+                    val todayStr = LocalDate.now().format(dateFormatter)
+                    val currentTime = LocalTime.now()
+                    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+                    val startTime = try {
+                        LocalTime.parse(selectedJob!!.workingHoursStart, timeFormatter)
+                    } catch (e: Exception) {
+                        LocalTime.now()
+                    }
+                    val status = if (currentTime.isAfter(startTime)) "LATE" else "PRESENT"
+                    val attendanceData = hashMapOf(
+                        "date" to todayStr,
+                        "status" to status
+                    )
+                    firestore.collection("jobs")
+                        .document(selectedJob!!.id)
+                        .collection("employees")
+                        .document(userId!!)
+                        .collection("attendance")
+                        .document(todayStr)
+                        .set(attendanceData)
+                        .await()
+                    scanFeedback = "Attendance marked as $status"
+                    Log.d("ScheduleScreen", "Attendance updated for job ${selectedJob!!.id}: $status")
+                } catch (e: Exception) {
+                    scanFeedback = "Failed to mark attendance"
+                    Log.e("ScheduleScreen", "Failed to update attendance", e)
+                }
+            } else {
+                scanFeedback = "Invalid QR code"
+                Log.w("ScheduleScreen", "Invalid QR code scanned: $scanResult")
+            }
+            scanResult = null
+            selectedJob = null
         }
     }
 
@@ -195,7 +246,6 @@ fun ScheduleScreen(navController: NavController) {
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Generate items for each day of the week
                     items(7) { dayIndex ->
                         val currentDay = currentWeekStart.plusDays(dayIndex.toLong())
                         val dayJobs = jobs.filter { job ->
@@ -211,18 +261,37 @@ fun ScheduleScreen(navController: NavController) {
                         DayScheduleItem(
                             day = currentDay,
                             jobs = dayJobs,
-                            formatter = displayFormatter
+                            formatter = displayFormatter,
+                            onTakeAttendance = { job ->
+                                selectedJob = job
+                            },
+                            onScanResult = { result ->
+                                scanResult = result
+                            }
                         )
                     }
                 }
             }
         }
     }
+
+    if (scanFeedback != null) {
+        FeedbackDialog(
+            message = scanFeedback!!,
+            onDismiss = { scanFeedback = null }
+        )
+    }
 }
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun DayScheduleItem(day: LocalDate, jobs: List<Job>, formatter: DateTimeFormatter) {
+fun DayScheduleItem(
+    day: LocalDate,
+    jobs: List<Job>,
+    formatter: DateTimeFormatter,
+    onTakeAttendance: (Job) -> Unit,
+    onScanResult: (String?) -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
@@ -249,7 +318,12 @@ fun DayScheduleItem(day: LocalDate, jobs: List<Job>, formatter: DateTimeFormatte
                 )
             } else {
                 jobs.forEach { job ->
-                    JobItem(job = job)
+                    JobItem(
+                        job = job,
+                        isToday = day == LocalDate.now(),
+                        onTakeAttendance = { onTakeAttendance(job) },
+                        onScanResult = onScanResult
+                    )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
             }
@@ -257,24 +331,95 @@ fun DayScheduleItem(day: LocalDate, jobs: List<Job>, formatter: DateTimeFormatte
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun JobItem(job: Job) {
+fun JobItem(
+    job: Job,
+    isToday: Boolean,
+    onTakeAttendance: () -> Unit,
+    onScanResult: (String?) -> Unit
+) {
+    val context = LocalContext.current
+
+    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+    val currentTime = LocalTime.now()
+    val startTime = try {
+        LocalTime.parse(job.workingHoursStart, timeFormatter)
+    } catch (e: Exception) {
+        LocalTime.now()
+    }
+    val isNearStart = isToday && currentTime.isAfter(startTime.minusMinutes(60)) && currentTime.isBefore(startTime)
+    val hasStarted = isToday && !currentTime.isBefore(startTime)
+    val showTakeAttendance = isToday && (isNearStart || hasStarted) && job.attendanceCode != null
+
+
+    // Launcher for ScanActivity
+    val scanLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val qrResult = result.data?.getStringExtra("qr_result")
+            if (qrResult != null) {
+                onTakeAttendance() // Set selectedJob
+                onScanResult(qrResult) // Set scanResult
+            } else {
+                Log.w("JobItem", "No QR code result received")
+                onScanResult(null)
+            }
+        } else {
+            Log.w("JobItem", "ScanActivity cancelled or failed")
+            onScanResult(null)
+        }
+    }
+
+    // Permission launcher for camera
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (isGranted) {
+
+            scanLauncher.launch(android.content.Intent(context, ScanActivity::class.java))
+        } else {
+            Log.e("JobItem", "Camera permission denied")
+        }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                hasStarted -> Color(0xFFE8F5E9) // Light green for started
+                isNearStart -> Color(0xFFFFF9C4) // Light yellow for near start
+                else -> Color(0xFFF5F5F5) // Default
+            }
+        )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp)
         ) {
-            Text(
-                text = job.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = Color.Black
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = job.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.Black
+                )
+                if (isNearStart || hasStarted) {
+                    Text(
+                        text = if (hasStarted) "Started" else "Starting Soon",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF4CAF50),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
             Text(
                 text = "Company: ${job.companyName}",
                 style = MaterialTheme.typography.bodyMedium,
@@ -290,6 +435,64 @@ fun JobItem(job: Job) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = Color.Gray
             )
+            if (showTakeAttendance) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1976D2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(text = "Take Attendance", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun FeedbackDialog(
+    message: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (message.contains("Invalid") || message.contains("Failed")) Color.Red else Color(0xFF4CAF50),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1976D2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(text = "Close", fontSize = 12.sp)
+                }
+            }
         }
     }
 }

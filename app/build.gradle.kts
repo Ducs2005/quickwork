@@ -56,6 +56,7 @@ dependencies {
     implementation(libs.androidx.material3.lint)
     implementation(libs.firebase.auth.ktx)
     implementation(libs.firebase.firestore.ktx)
+    implementation(libs.androidx.appcompat)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
@@ -79,6 +80,20 @@ dependencies {
     implementation("androidx.compose.material3:material3-window-size-class:1.1.2") // optional
     implementation("io.coil-kt:coil-compose:2.0.0")
     implementation ("com.jakewharton.threetenabp:threetenabp:1.4.5")
+
+    implementation ("com.google.zxing:core:3.5.1")
+    implementation ("com.google.zxing:javase:3.5.1") //) For Bitmap generation
+
+    // ML Kit Barcode Scanning
+    implementation("com.google.mlkit:barcode-scanning:17.2.0")
+
+// CameraX (Preview + CameraController)
+    implementation("androidx.camera:camera-camera2:1.3.0")
+    implementation("androidx.camera:camera-lifecycle:1.3.0")
+    implementation("androidx.camera:camera-view:1.3.0")
+    implementation ("com.journeyapps:zxing-android-embedded:4.3.0")
+
+
 
 
 }

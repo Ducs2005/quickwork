@@ -1,7 +1,10 @@
 package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.os.Build
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -30,16 +34,19 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
-import com.example.quickwork.data.models.Employee
-import com.example.quickwork.data.models.Job
-import com.example.quickwork.data.models.JobType
+import com.example.quickwork.data.models.*
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
-import androidx.compose.ui.tooling.preview.Preview
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.tasks.await
+import org.threeten.bp.LocalDate
+import org.threeten.bp.format.DateTimeFormatter
+import java.util.UUID
 
 data class BottomNavItem(val name: String, val route: String, val icon: ImageVector)
 
+@RequiresApi(Build.VERSION_CODES.O)
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,10 +54,10 @@ fun JobManageScreen(navController: NavController) {
     val currentUser = FirebaseAuth.getInstance().currentUser
     val userId = currentUser?.uid
     val firestore = FirebaseFirestore.getInstance()
-
     var jobs by remember { mutableStateOf<List<Job>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var selectedJob by remember { mutableStateOf<Job?>(null) }
+    var selectedAttendanceJob by remember { mutableStateOf<Job?>(null) }
 
     // Define bottom navigation items
     val navItems = listOf(
@@ -80,13 +87,25 @@ fun JobManageScreen(navController: NavController) {
                                     Log.w("JobManageScreen", "Invalid employee document: ${empDoc.data}")
                                     null
                                 } else {
-                                    Log.d("JobManageScreen", "Employee ID: $empId")
-                                    Employee(id = empId)
+                                    val attendanceDocs = firestore.collection("jobs")
+                                        .document(doc.id)
+                                        .collection("employees")
+                                        .document(empId)
+                                        .collection("attendance")
+                                        .get()
+                                        .await()
+                                    val attendanceList = attendanceDocs.documents.mapNotNull { attDoc ->
+                                        val date = attDoc.getString("date") ?: ""
+                                        val status = attDoc.getString("status")?.let { AttendanceStatus.valueOf(it) }
+                                        if (date.isNotBlank() && status != null) {
+                                            DailyAttendance(date = date, status = status)
+                                        } else {
+                                            null
+                                        }
+                                    }
+                                    Employee(id = empId, attendance = attendanceList)
                                 }
                             }
-
-                            Log.d("JobManageScreen", "Employees for job ${doc.id}: $employeeList")
-
                             Job(
                                 id = doc.id,
                                 name = doc.getString("name") ?: "",
@@ -102,7 +121,10 @@ fun JobManageScreen(navController: NavController) {
                                 dateStart = doc.getString("dateStart") ?: "",
                                 dateEnd = doc.getString("dateEnd") ?: "",
                                 employees = employeeList,
-                                employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0
+                                employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
+                                companyName = doc.getString("companyName") ?: "Unknown",
+                                categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
+                                attendanceCode = doc.getString("attendanceCode")
                             )
                         }
                         isLoading = false
@@ -207,7 +229,8 @@ fun JobManageScreen(navController: NavController) {
                 items(jobs) { job ->
                     JobCard(
                         job = job,
-                        onClick = { selectedJob = job }
+                        onClick = { selectedJob = job },
+                        onAttendanceClick = { selectedAttendanceJob = job }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
@@ -236,18 +259,45 @@ fun JobManageScreen(navController: NavController) {
                 }
             )
         }
+
+        if (selectedAttendanceJob != null) {
+            AttendanceDialog(
+                job = selectedAttendanceJob!!,
+                onDismiss = { selectedAttendanceJob = null },
+                onUpdateJob = { updatedJob ->
+                    jobs = jobs.map { if (it.id == updatedJob.id) updatedJob else it }
+                }
+            )
+        }
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
-fun JobCard(job: Job, onClick: () -> Unit) {
+fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
+    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val today = LocalDate.now() // May 08, 2025
+    val startDate = try {
+        LocalDate.parse(job.dateStart, formatter)
+    } catch (e: Exception) {
+        LocalDate.now().minusDays(1) // Fallback to ensure no crash
+    }
+    val endDate = try {
+        LocalDate.parse(job.dateEnd, formatter)
+    } catch (e: Exception) {
+        LocalDate.now().plusDays(1) // Fallback to ensure no crash
+    }
+    val isActive = !today.isBefore(startDate) && !today.isAfter(endDate)
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isActive) Color(0xFFE8F5E9) else Color.White // Light green for active jobs
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (job.imageUrl.isNotEmpty()) {
@@ -318,11 +368,24 @@ fun JobCard(job: Job, onClick: () -> Unit) {
                 fontWeight = FontWeight.Medium,
                 color = if (job.employees.size >= job.employeeRequired) Color.Red else Color.Black
             )
+            if (isActive) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onAttendanceClick,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF4CAF50), // Green for attendance
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text(text = "Take Attendance", fontSize = 12.sp)
+                }
+            }
         }
     }
 }
 
-// Helper function to create a notification
 private fun createNotification(
     firestore: FirebaseFirestore,
     employeeId: String,
@@ -350,6 +413,7 @@ private fun createNotification(
         }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun EmployeeManagementDialog(
     job: Job,
@@ -375,7 +439,23 @@ fun EmployeeManagementDialog(
                     Log.w("EmployeeManagementDialog", "Invalid employee document: ${empDoc.data}")
                     null
                 } else {
-                    Employee(id = empId)
+                    val attendanceDocs = firestore.collection("jobs")
+                        .document(job.id)
+                        .collection("employees")
+                        .document(empId)
+                        .collection("attendance")
+                        .get()
+                        .await()
+                    val attendanceList = attendanceDocs.documents.mapNotNull { attDoc ->
+                        val date = attDoc.getString("date") ?: ""
+                        val status = attDoc.getString("status")?.let { AttendanceStatus.valueOf(it) }
+                        if (date.isNotBlank() && status != null) {
+                            DailyAttendance(date = date, status = status)
+                        } else {
+                            null
+                        }
+                    }
+                    Employee(id = empId, attendance = attendanceList)
                 }
             }
             val states = mutableMapOf<String, String>()
@@ -499,6 +579,237 @@ fun EmployeeManagementDialog(
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+fun AttendanceDialog(
+    job: Job,
+    onDismiss: () -> Unit,
+    onUpdateJob: (Job) -> Unit
+) {
+    val firestore = FirebaseFirestore.getInstance()
+    var employees by remember { mutableStateOf<List<Employee>>(job.employees) }
+    var todayAttendance by remember { mutableStateOf<Map<String, AttendanceStatus>>(emptyMap()) }
+    var employeeNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var qrCodeBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var qrCodeText by remember { mutableStateOf<String?>(null) }
+    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val today = LocalDate.now() // May 08, 2025
+    val todayStr = today.format(formatter)
+
+    LaunchedEffect(job.id) {
+        try {
+            val updatedEmployees = mutableListOf<Employee>()
+            val attendanceMap = mutableMapOf<String, AttendanceStatus>()
+            val nameMap = mutableMapOf<String, String>()
+            for (employee in job.employees) {
+                // Fetch employee name
+                val userDoc = firestore.collection("users")
+                    .document(employee.id)
+                    .get()
+                    .await()
+                val name = userDoc.getString("name") ?: "Unknown"
+                nameMap[employee.id] = name
+
+                // Fetch attendance
+                val attendanceDocs = firestore.collection("jobs")
+                    .document(job.id)
+                    .collection("employees")
+                    .document(employee.id)
+                    .collection("attendance")
+                    .get()
+                    .await()
+                val attendanceList = attendanceDocs.documents.mapNotNull { attDoc ->
+                    val date = attDoc.getString("date") ?: ""
+                    val status = attDoc.getString("status")?.let { AttendanceStatus.valueOf(it) }
+                    if (date.isNotBlank() && status != null) {
+                        DailyAttendance(date = date, status = status)
+                    } else {
+                        null
+                    }
+                }
+                val todayAtt = attendanceList.find { it.date == todayStr }
+                attendanceMap[employee.id] = todayAtt?.status ?: AttendanceStatus.ABSENT
+                updatedEmployees.add(employee.copy(attendance = attendanceList))
+            }
+            employees = updatedEmployees
+            todayAttendance = attendanceMap
+            employeeNames = nameMap
+            onUpdateJob(job.copy(employees = updatedEmployees))
+        } catch (e: Exception) {
+            Log.e("AttendanceDialog", "Failed to load attendance or names", e)
+        }
+    }
+
+    fun generateQRCode(text: String): Bitmap {
+        val writer = QRCodeWriter()
+        val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, 200, 200)
+        val width = bitMatrix.width
+        val height = bitMatrix.height
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
+        for (x in 0 until width) {
+            for (y in 0 until height) {
+                bitmap.setPixel(x, y, if (bitMatrix[x, y]) Color.Black.hashCode() else Color.White.hashCode())
+            }
+        }
+        return bitmap
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Text(
+                    text = "Attendance for ${job.name} - $todayStr",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                if (employees.isEmpty()) {
+                    Text(
+                        text = "No employees assigned",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 300.dp)
+                    ) {
+                        items(employees) { employee ->
+                            AttendanceItem(
+                                employee = employee,
+                                employeeName = employeeNames[employee.id] ?: "Unknown",
+                                currentStatus = todayAttendance[employee.id] ?: AttendanceStatus.ABSENT
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Button(
+                        onClick = {
+                            val newCode = UUID.randomUUID().toString()
+                            firestore.collection("jobs")
+                                .document(job.id)
+                                .update("attendanceCode", newCode)
+                                .addOnSuccessListener {
+                                    qrCodeText = newCode
+                                    qrCodeBitmap = generateQRCode(newCode)
+                                    onUpdateJob(job.copy(attendanceCode = newCode))
+                                    Log.d("AttendanceDialog", "Attendance code updated: $newCode")
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.e("AttendanceDialog", "Failed to update attendance code", e)
+                                }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1976D2),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(text = "Create QR", fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1976D2),
+                            contentColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(text = "Close", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    if (qrCodeBitmap != null && qrCodeText != null) {
+        QRCodeDialog(
+            qrCodeBitmap = qrCodeBitmap!!,
+            qrCodeText = qrCodeText!!,
+            onDismiss = { qrCodeBitmap = null; qrCodeText = null }
+        )
+    }
+}
+
+@Composable
+fun QRCodeDialog(
+    qrCodeBitmap: Bitmap,
+    qrCodeText: String,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color.White),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "QR Code for Attendance",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Black
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Image(
+                    bitmap = qrCodeBitmap.asImageBitmap(),
+                    contentDescription = "QR Code",
+                    modifier = Modifier
+                        .size(200.dp)
+                        .background(Color.White)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Code: $qrCodeText",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Black,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1976D2),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(text = "Close", fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun EmployeeItem(
     employee: Employee,
@@ -566,8 +877,42 @@ fun EmployeeItem(
     }
 }
 
-@Preview(showBackground = true)
 @Composable
-fun JobManageScreenPreview() {
-    JobManageScreen(navController = NavController(LocalContext.current))
+fun AttendanceItem(
+    employee: Employee,
+    employeeName: String,
+    currentStatus: AttendanceStatus
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+                Text(
+                    text = "Employee: $employeeName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Black
+                )
+                Text(
+                    text = "Attendance: $currentStatus",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (currentStatus) {
+                        AttendanceStatus.PRESENT -> Color(0xFF4CAF50)
+                        AttendanceStatus.ABSENT -> Color.Red
+                        else -> Color.Gray
+                    }
+                )
+            }
+        }
+    }
 }
