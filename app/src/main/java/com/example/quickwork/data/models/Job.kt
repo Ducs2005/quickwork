@@ -34,7 +34,8 @@ data class DailyAttendance(
 data class Employee(
     val id: String = "", // Employee ID
     val jobState:JobState  = JobState.APPLYING,
-    val attendance: List<DailyAttendance> = emptyList()
+    val attendance: List<DailyAttendance> = emptyList(),
+    val receiveSalary:Boolean = false,
 )
 enum class JobState {
     APPLYING, PRESENT, WORKING, ENDED, DENIED

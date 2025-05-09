@@ -1,10 +1,9 @@
 package com.example.quickwork.data.models
 
-// Rating Data Class
 data class Rating(
-    val id: String = "",
-    val userId: String = "",
-    val jobId: String = "",
-    val content: String = "",
+    val stars: Int = 0,
+    val comment: String = "",
+    val jobName: String = "",
     val date: String = "",
+    val ratedId: String = ""
 )

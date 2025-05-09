@@ -1,11 +1,10 @@
 package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
-import android.os.Build
 import android.util.Log
-import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,7 +40,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
     var job by remember { mutableStateOf<Job?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var hasApplied by remember { mutableStateOf(false) }
-    var companyName by remember { mutableStateOf("") }
+    var employerName by remember { mutableStateOf("") }
     var categoryNames by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(jobId) {
@@ -72,12 +71,12 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     categoryIds = document.get("categoryIds") as? List<String> ?: emptyList()
                 )
 
-                // Fetch company name from user document
+                // Fetch employer name from user document
                 val userDoc = firestore.collection("users")
                     .document(baseJob.employerId)
                     .get()
                     .await()
-                companyName = userDoc.getString("companyName") ?: "Unknown Company"
+                employerName = userDoc.getString("name") ?: "Unknown Employer"
 
                 // Fetch category names
                 val categoryIds = baseJob.categoryIds
@@ -130,7 +129,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
         }
     }
 
-    @RequiresApi(Build.VERSION_CODES.O)
+    //@RequiresApi(Build.VERSION_CODES.O)
     fun applyForJob() {
         if (userId != null && job != null) {
             val jobId = job!!.id
@@ -305,7 +304,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Apply Button
-                    if (!hasApplied && !isFull) {
+                    if (!hasApplied && !isFull && !isEmployer) {
                         Button(
                             onClick = { applyForJob() },
                             modifier = Modifier
@@ -376,11 +375,14 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Company Name
+                    // Employer Name
                     Text(
-                        text = "Company: $companyName",
+                        text = "Employer: $employerName",
                         fontSize = 14.sp,
-                        color = Color.DarkGray
+                        color = Color.Blue,
+                        modifier = Modifier.clickable {
+                            navController.navigate("profile/${job!!.employerId}")
+                        }
                     )
                     Spacer(modifier = Modifier.height(16.dp))
 

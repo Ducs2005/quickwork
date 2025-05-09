@@ -59,6 +59,47 @@ fun JobManageScreen(navController: NavController) {
     var selectedJob by remember { mutableStateOf<Job?>(null) }
     var selectedAttendanceJob by remember { mutableStateOf<Job?>(null) }
 
+    // Categorize jobs
+    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val today = LocalDate.now() // May 09, 2025
+    val managingJobs by remember(jobs) {
+        derivedStateOf {
+            jobs.filter {
+                try {
+                    val startDate = LocalDate.parse(it.dateStart, formatter)
+                    val endDate = LocalDate.parse(it.dateEnd, formatter)
+                    !today.isBefore(startDate) && !today.isAfter(endDate)
+                } catch (e: Exception) {
+                    false // Exclude invalid dates
+                }
+            }
+        }
+    }
+    val incomingJobs by remember(jobs) {
+        derivedStateOf {
+            jobs.filter {
+                try {
+                    val startDate = LocalDate.parse(it.dateStart, formatter)
+                    today.isBefore(startDate)
+                } catch (e: Exception) {
+                    false // Exclude invalid dates
+                }
+            }
+        }
+    }
+    val endedJobs by remember(jobs) {
+        derivedStateOf {
+            jobs.filter {
+                try {
+                    val endDate = LocalDate.parse(it.dateEnd, formatter)
+                    today.isAfter(endDate)
+                } catch (e: Exception) {
+                    false // Exclude invalid dates
+                }
+            }
+        }
+    }
+
     // Define bottom navigation items
     val navItems = listOf(
         BottomNavItem("Home", "homeScreen", Icons.Filled.Home),
@@ -226,25 +267,102 @@ fun JobManageScreen(navController: NavController) {
                     .padding(padding)
                     .padding(horizontal = 16.dp)
             ) {
-                items(jobs) { job ->
-                    JobCard(
-                        job = job,
-                        onClick = { selectedJob = job },
-                        onAttendanceClick = { selectedAttendanceJob = job }
+                // Managing Jobs Section
+                item {
+                    Text(
+                        text = "Managing Jobs",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
                 }
-                if (jobs.isEmpty()) {
+                if (managingJobs.isEmpty()) {
                     item {
                         Text(
-                            text = "No jobs found.",
+                            text = "No managing jobs.",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 20.dp),
+                                .padding(bottom = 16.dp),
                             fontSize = 16.sp,
                             color = Color.Gray,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                    }
+                } else {
+                    items(managingJobs) { job ->
+                        JobCard(
+                            job = job,
+                            onClick = { selectedJob = job },
+                            onAttendanceClick = { selectedAttendanceJob = job }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
+                // Incoming Jobs Section
+                item {
+                    Text(
+                        text = "Incoming Jobs",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    )
+                }
+                if (incomingJobs.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No incoming jobs.",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp),
+                            fontSize = 16.sp,
+                            color = Color.Gray,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                } else {
+                    items(incomingJobs) { job ->
+                        JobCard(
+                            job = job,
+                            onClick = { selectedJob = job },
+                            onAttendanceClick = { selectedAttendanceJob = job }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+
+                // Ended Jobs Section
+                item {
+                    Text(
+                        text = "Ended Jobs",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black,
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    )
+                }
+                if (endedJobs.isEmpty()) {
+                    item {
+                        Text(
+                            text = "No ended jobs.",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 16.dp),
+                            fontSize = 16.sp,
+                            color = Color.Gray,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                } else {
+                    items(endedJobs) { job ->
+                        JobCard(
+                            job = job,
+                            onClick = { selectedJob = job },
+                            onAttendanceClick = { selectedAttendanceJob = job }
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
                     }
                 }
             }
@@ -253,6 +371,7 @@ fun JobManageScreen(navController: NavController) {
         if (selectedJob != null) {
             EmployeeManagementDialog(
                 job = selectedJob!!,
+                navController = navController,
                 onDismiss = { selectedJob = null },
                 onUpdateJob = { updatedJob ->
                     jobs = jobs.map { if (it.id == updatedJob.id) updatedJob else it }
@@ -276,7 +395,7 @@ fun JobManageScreen(navController: NavController) {
 @Composable
 fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now() // May 08, 2025
+    val today = LocalDate.now() // May 09, 2025
     val startDate = try {
         LocalDate.parse(job.dateStart, formatter)
     } catch (e: Exception) {
@@ -417,6 +536,7 @@ private fun createNotification(
 @Composable
 fun EmployeeManagementDialog(
     job: Job,
+    navController: NavController,
     onDismiss: () -> Unit,
     onUpdateJob: (Job) -> Unit
 ) {
@@ -512,6 +632,7 @@ fun EmployeeManagementDialog(
                             EmployeeItem(
                                 employee = employee,
                                 state = employeeStates[employee.id] ?: "APPLYING",
+                                onClick = { navController.navigate("profile/${employee.id}") },
                                 onAccept = {
                                     firestore.collection("jobs")
                                         .document(job.id)
@@ -593,7 +714,7 @@ fun AttendanceDialog(
     var qrCodeBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var qrCodeText by remember { mutableStateOf<String?>(null) }
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now() // May 08, 2025
+    val today = LocalDate.now() // May 09, 2025
     val todayStr = today.format(formatter)
 
     LaunchedEffect(job.id) {
@@ -814,11 +935,14 @@ fun QRCodeDialog(
 fun EmployeeItem(
     employee: Employee,
     state: String,
+    onClick: () -> Unit,
     onAccept: () -> Unit,
     onFire: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         shape = RoundedCornerShape(8.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFFF5F5F5))

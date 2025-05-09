@@ -62,6 +62,10 @@ fun SetupNavGraph(navController: NavHostController) {
                 val keyword = backStackEntry.arguments?.getString("keyword") ?: ""
                 JobSearchResultsScreen(navController,keyword)
             }
+            composable("profile/{userId}") { backStackEntry ->
+                val userId = backStackEntry.arguments?.getString("userId") ?: ""
+                ProfileScreen(userId = userId)
+            }
 
         }
     }
