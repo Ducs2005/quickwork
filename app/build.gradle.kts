@@ -75,7 +75,7 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
-    implementation ("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.1")
+    implementation (libs.kotlinx.coroutines.play.services)
     implementation("androidx.compose.material3:material3:1.2.1") // or latest stable
     implementation("androidx.compose.material3:material3-window-size-class:1.1.2") // optional
     implementation("io.coil-kt:coil-compose:2.0.0")
@@ -92,8 +92,9 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.3.0")
     implementation("androidx.camera:camera-view:1.3.0")
     implementation ("com.journeyapps:zxing-android-embedded:4.3.0")
+    //implementation ("org.threeten:threetenbp:1.6.8")
 
-
+    //implementation ("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
 
 
 }

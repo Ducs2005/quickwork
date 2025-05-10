@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
 import com.example.quickwork.data.models.User
 import com.example.quickwork.data.models.UserType
 import com.google.firebase.firestore.FirebaseFirestore
@@ -32,7 +33,7 @@ data class Rating(
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(userId: String) {
+fun ProfileScreen(userId: String, navController: NavController) {
     val firestore = FirebaseFirestore.getInstance()
     var user by remember { mutableStateOf<User?>(null) }
     var ratings by remember { mutableStateOf<List<Rating>>(emptyList()) }
@@ -178,6 +179,20 @@ fun ProfileScreen(userId: String) {
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Color.DarkGray
                             )
+                        }
+
+                        // Contact Button
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { navController.navigate("chat/$userId") },
+                            modifier = Modifier.align(Alignment.End),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF1976D2),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(text = "Contact", fontSize = 14.sp)
                         }
                     }
                 }

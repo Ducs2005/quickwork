@@ -64,8 +64,14 @@ fun SetupNavGraph(navController: NavHostController) {
             }
             composable("profile/{userId}") { backStackEntry ->
                 val userId = backStackEntry.arguments?.getString("userId") ?: ""
-                ProfileScreen(userId = userId)
+                ProfileScreen( userId = userId, navController)
             }
+            composable("chatRoom") { MessageRoomsScreen(navController) }
+            composable("chat/{userId}") { backStackEntry ->
+                val userId = backStackEntry.arguments?.getString("userId") ?: ""
+                ChatScreen(navController, userId)
+            }
+
 
         }
     }

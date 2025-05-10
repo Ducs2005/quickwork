@@ -47,7 +47,7 @@ fun BottomNavigation(navController: NavController) {
                 BottomNavItem("Trang Chủ", R.drawable.ic_home, "jobList"),
                 BottomNavItem("Hồ Sơ", R.drawable.ic_part_time_job, "jobState"),
                 BottomNavItem("Lịch trình", R.drawable.ic_utilities, "schedule"),
-                BottomNavItem("Chat", R.drawable.ic_chat, "chat"),
+                BottomNavItem("Chat", R.drawable.ic_chat, "chatRoom"),
                 BottomNavItem("Menu", R.drawable.ic_menu, "setting")
             )
 
