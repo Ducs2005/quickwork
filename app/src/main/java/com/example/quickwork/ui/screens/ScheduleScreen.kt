@@ -12,12 +12,16 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,6 +32,8 @@ import androidx.navigation.NavController
 import com.example.quickwork.ScanActivity
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
+import com.example.quickwork.ui.components.BottomNavigation
+import com.example.quickwork.ui.components.Header
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
@@ -36,6 +42,8 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.WeekFields
 import java.util.*
+
+private val GreenMain = Color(0xFF4CAF50)
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
@@ -167,30 +175,24 @@ fun ScheduleScreen(navController: NavController) {
     val weekRangeText = "${currentWeekStart.format(displayFormatter)} - ${weekEnd.format(displayFormatter)}"
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Weekly Schedule", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(
-                            imageVector = Icons.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1976D2),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
-                )
-            )
-        }
-    ) { padding ->
+        topBar = { Header(navController) },
+
+        bottomBar = { BottomNavigation(navController, currentScreen = "schedule") },
+
+        ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
                 .padding(horizontal = 16.dp)
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.9f),
+                            Color.White.copy(alpha = 0.7f)
+                        )
+                    )
+                )
         ) {
             // Week navigation
             Row(
@@ -204,7 +206,7 @@ fun ScheduleScreen(navController: NavController) {
                     Icon(
                         imageVector = Icons.Filled.ChevronLeft,
                         contentDescription = "Previous Week",
-                        tint = Color(0xFF1976D2)
+                        tint = GreenMain
                     )
                 }
                 Text(
@@ -217,7 +219,7 @@ fun ScheduleScreen(navController: NavController) {
                     Icon(
                         imageVector = Icons.Filled.ChevronRight,
                         contentDescription = "Next Week",
-                        tint = Color(0xFF1976D2)
+                        tint = GreenMain
                     )
                 }
             }
@@ -227,7 +229,7 @@ fun ScheduleScreen(navController: NavController) {
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator()
+                    CircularProgressIndicator(color = GreenMain)
                 }
             } else if (jobs.isEmpty()) {
                 Box(
@@ -352,7 +354,6 @@ fun JobItem(
     val hasStarted = isToday && !currentTime.isBefore(startTime)
     val showTakeAttendance = isToday && (isNearStart || hasStarted) && job.attendanceCode != null
 
-
     // Launcher for ScanActivity
     val scanLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -377,7 +378,6 @@ fun JobItem(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-
             scanLauncher.launch(android.content.Intent(context, ScanActivity::class.java))
         } else {
             Log.e("JobItem", "Camera permission denied")
@@ -389,9 +389,9 @@ fun JobItem(
         shape = RoundedCornerShape(8.dp),
         colors = CardDefaults.cardColors(
             containerColor = when {
-                hasStarted -> Color(0xFFE8F5E9) // Light green for started
-                isNearStart -> Color(0xFFFFF9C4) // Light yellow for near start
-                else -> Color(0xFFF5F5F5) // Default
+                hasStarted -> GreenMain.copy(alpha = 0.1f) // Light green for started
+                isNearStart -> GreenMain.copy(alpha = 0.05f) // Lighter green for near start
+                else -> Color.White // Default
             }
         )
     ) {
@@ -415,7 +415,7 @@ fun JobItem(
                     Text(
                         text = if (hasStarted) "Started" else "Starting Soon",
                         style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF4CAF50),
+                        color = GreenMain,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -442,7 +442,7 @@ fun JobItem(
                         cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1976D2),
+                        containerColor = GreenMain,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp),
@@ -478,14 +478,14 @@ fun FeedbackDialog(
                 Text(
                     text = message,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = if (message.contains("Invalid") || message.contains("Failed")) Color.Red else Color(0xFF4CAF50),
+                    color = if (message.contains("Invalid") || message.contains("Failed")) Color.Red else GreenMain,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1976D2),
+                        containerColor = GreenMain,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp)
