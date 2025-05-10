@@ -233,3 +233,59 @@ fun LoginScreen(navController: NavController) {
 //        }
 //    )
 //}
+
+
+
+@Composable
+fun PasswordField(
+    label: String,
+    password: String,
+    onPasswordChange: (String) -> Unit,
+    passwordVisible: Boolean,
+    onVisibilityChange: () -> Unit
+) {
+    OutlinedTextField(
+        value = password,
+        onValueChange = onPasswordChange,
+        label = { Text(label) },
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+        trailingIcon = {
+            IconButton(onClick = onVisibilityChange) {
+                Icon(
+                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = if (passwordVisible) "Hide Password" else "Show Password"
+                )
+            }
+        }
+    )
+}
+
+@Composable
+fun InputField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    isPassword: Boolean = false
+) {
+    val visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        singleLine = true,
+        visualTransformation = visualTransformation,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Color(0xFF4CAF50),
+            unfocusedBorderColor = Color.LightGray,
+            cursorColor = Color(0xFF4CAF50)
+        )
+    )
+}

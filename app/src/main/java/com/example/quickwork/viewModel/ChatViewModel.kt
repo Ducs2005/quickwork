@@ -19,7 +19,9 @@ data class ChatUiState(
     val isLoading: Boolean = true,
     val messages: List<Pair<Message, Boolean>> = emptyList(), // Pair of Message and isSent
     val receiverName: String = "Unknown",
-    val error: String? = null
+    val error: String? = null,
+    val senderAvatarUrl: String? = null, // URL to the current user's avatar image
+    val receiverAvatarUrl: String? = null // URL to the receiver's avatar image
 )
 
 class ChatViewModel(
@@ -36,21 +38,32 @@ class ChatViewModel(
 
     init {
         if (userId.isEmpty() || receiverId.isEmpty()) {
-            _uiState.value = ChatUiState(isLoading = false, error = "Invalid user or receiver ID")
-
+            _uiState.value = ChatUiState(
+                isLoading = false,
+                error = "Invalid user or receiver ID"
+            )
+        } else {
+            loadData()
         }
-        else loadData()
     }
 
     private fun loadData() {
         viewModelScope.launch {
             try {
-                // Fetch receiver's name
-                val userDoc = firestore.collection("users")
+                // Fetch sender's avatar
+                val senderDoc = firestore.collection("users")
+                    .document(userId)
+                    .get()
+                    .await()
+                val senderAvatarUrl = senderDoc.getString("avatarUrl")
+
+                // Fetch receiver's name and avatar
+                val receiverDoc = firestore.collection("users")
                     .document(receiverId)
                     .get()
                     .await()
-                val receiverName = userDoc.getString("name") ?: "Unknown"
+                val receiverName = receiverDoc.getString("name") ?: "Unknown"
+                val receiverAvatarUrl = receiverDoc.getString("avatarUrl")
 
                 // Set up real-time listeners
                 sentListener = firestore.collection("users")
@@ -66,7 +79,7 @@ class ChatViewModel(
                         }
 
                         viewModelScope.launch {
-                            updateMessages(receiverName)
+                            updateMessages(receiverName, senderAvatarUrl, receiverAvatarUrl)
                         }
                     }
 
@@ -83,23 +96,29 @@ class ChatViewModel(
                         }
 
                         viewModelScope.launch {
-                            updateMessages(receiverName)
+                            updateMessages(receiverName, senderAvatarUrl, receiverAvatarUrl)
                         }
                     }
 
                 // Initial load
-                updateMessages(receiverName)
+                updateMessages(receiverName, senderAvatarUrl, receiverAvatarUrl)
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Failed to load data", e)
                 _uiState.value = ChatUiState(
                     isLoading = false,
-                    error = "Failed to load chat data"
+                    error = "Failed to load chat data",
+                    senderAvatarUrl = null,
+                    receiverAvatarUrl = null
                 )
             }
         }
     }
 
-    private suspend fun updateMessages(receiverName: String) {
+    private suspend fun updateMessages(
+        receiverName: String,
+        senderAvatarUrl: String?,
+        receiverAvatarUrl: String?
+    ) {
         try {
             val allMessages = mutableListOf<Pair<Message, Boolean>>()
 
@@ -158,7 +177,9 @@ class ChatViewModel(
             _uiState.value = ChatUiState(
                 isLoading = false,
                 messages = allMessages.sortedBy { it.first.date },
-                receiverName = receiverName
+                receiverName = receiverName,
+                senderAvatarUrl = senderAvatarUrl,
+                receiverAvatarUrl = receiverAvatarUrl
             )
         } catch (e: Exception) {
             Log.e("ChatViewModel", "Failed to update messages", e)

@@ -95,6 +95,8 @@ dependencies {
     //implementation ("org.threeten:threetenbp:1.6.8")
     implementation("androidx.compose.animation:animation:1.6.0")
 
+    implementation ("com.google.accompanist:accompanist-pager-indicators:0.32.0")
+    implementation ("com.google.accompanist:accompanist-pager:0.32.0")
     //implementation ("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
 
 

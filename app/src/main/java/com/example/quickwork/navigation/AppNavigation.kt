@@ -53,7 +53,7 @@ fun SetupNavGraph(navController: NavHostController) {
         }
 
         composable("login") { LoginScreen(navController) }
-        composable("register") { RegisterScreen(navController) }
+        //composable("register") { RegisterScreen(navController) }
         composable("jobList") { JobListScreen(navController) }
         composable("notification") { NotificationScreen(navController) }
         composable("schedule") { ScheduleScreen(navController) }
@@ -91,6 +91,8 @@ fun SetupNavGraph(navController: NavHostController) {
             val userId = backStackEntry.arguments?.getString("userId") ?: ""
             ProfileScreen(userId = userId, navController)
         }
+        composable("hiring") { HiringScreen(navController) }
+
         composable("chatRoom") { MessageRoomsScreen(navController) }
         composable("chat/{userId}") { backStackEntry ->
             val userId = backStackEntry.arguments?.getString("userId") ?: ""

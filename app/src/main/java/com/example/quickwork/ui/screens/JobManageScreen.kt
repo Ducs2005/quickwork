@@ -14,18 +14,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ExitToApp
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Work
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,7 +38,11 @@ import org.threeten.bp.LocalDate
 import org.threeten.bp.format.DateTimeFormatter
 import java.util.UUID
 
-data class BottomNavItem(val name: String, val route: String, val icon: ImageVector)
+private val GreenMain = Color(0xFF4CAF50)
+private val GreenLight = Color(0xFFE8F5E9)
+private val GrayText = Color(0xFF616161)
+
+enum class JobCategory { MANAGING, INCOMING, ENDED }
 
 @RequiresApi(Build.VERSION_CODES.O)
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -58,10 +56,11 @@ fun JobManageScreen(navController: NavController) {
     var isLoading by remember { mutableStateOf(true) }
     var selectedJob by remember { mutableStateOf<Job?>(null) }
     var selectedAttendanceJob by remember { mutableStateOf<Job?>(null) }
+    var selectedCategory by remember { mutableStateOf(JobCategory.MANAGING) }
 
     // Categorize jobs
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now() // May 09, 2025
+    val today = LocalDate.now() // May 10, 2025
     val managingJobs by remember(jobs) {
         derivedStateOf {
             jobs.filter {
@@ -99,14 +98,6 @@ fun JobManageScreen(navController: NavController) {
             }
         }
     }
-
-    // Define bottom navigation items
-    val navItems = listOf(
-        BottomNavItem("Home", "homeScreen", Icons.Filled.Home),
-        BottomNavItem("Jobs", "jobManageScreen", Icons.Filled.Work),
-        BottomNavItem("Profile", "profileScreen", Icons.Filled.Person),
-        BottomNavItem("Logout", "logout", Icons.Filled.ExitToApp)
-    )
 
     LaunchedEffect(userId) {
         if (userId != null) {
@@ -181,68 +172,20 @@ fun JobManageScreen(navController: NavController) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Manage Your Jobs", fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = { navController.navigateUp() }) {
-                        Icon(
-                            imageVector = Icons.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF1976D2),
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White
-                )
+            ReusableTopAppBar(
+                title = "Manage Your Jobs",
+                navController = navController,
+                showBackButton = true
             )
         },
         bottomBar = {
-            NavigationBar(
-                containerColor = Color(0xFF1976D2),
-                contentColor = Color.White
-            ) {
-                navItems.forEach { item ->
-                    NavigationBarItem(
-                        icon = {
-                            Icon(
-                                imageVector = item.icon,
-                                contentDescription = item.name,
-                                tint = if (navController.currentDestination?.route == item.route && item.route != "logout") Color.Yellow else Color.White
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = item.name,
-                                color = if (navController.currentDestination?.route == item.route && item.route != "logout") Color.Yellow else Color.White
-                            )
-                        },
-                        selected = navController.currentDestination?.route == item.route && item.route != "logout",
-                        onClick = {
-                            if (item.route == "logout") {
-                                FirebaseAuth.getInstance().signOut()
-                                navController.navigate("login") {
-                                    popUpTo(navController.graph.startDestinationId) { inclusive = true }
-                                    launchSingleTop = true
-                                }
-                            } else {
-                                navController.navigate(item.route) {
-                                    popUpTo(navController.graph.startDestinationId) { inclusive = false }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
-                            }
-                        }
-                    )
-                }
-            }
+            ReusableBottomNavBar(navController = navController)
         },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { navController.navigate("addJobScreen") },
                 modifier = Modifier.padding(16.dp),
-                containerColor = Color(0xFF1976D2),
+                containerColor = GreenMain,
                 contentColor = Color.White
             ) {
                 Icon(
@@ -250,7 +193,8 @@ fun JobManageScreen(navController: NavController) {
                     contentDescription = "Add Job"
                 )
             }
-        }
+        },
+        containerColor = GreenLight
     ) { padding ->
         if (isLoading) {
             Box(
@@ -259,111 +203,58 @@ fun JobManageScreen(navController: NavController) {
                     .fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator()
+                CircularProgressIndicator(color = GreenMain)
             }
         } else {
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .padding(padding)
-                    .padding(horizontal = 16.dp)
+                    .fillMaxSize()
             ) {
-                // Managing Jobs Section
-                item {
-                    Text(
-                        text = "Managing Jobs",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                // Category Headers
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    CategoryHeader(
+                        title = "Managing",
+                        isSelected = selectedCategory == JobCategory.MANAGING,
+                        onClick = { selectedCategory = JobCategory.MANAGING }
                     )
-                }
-                if (managingJobs.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No managing jobs.",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            fontSize = 16.sp,
-                            color = Color.Gray,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                } else {
-                    items(managingJobs) { job ->
-                        JobCard(
-                            job = job,
-                            onClick = { selectedJob = job },
-                            onAttendanceClick = { selectedAttendanceJob = job }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
+                    CategoryHeader(
+                        title = "Incoming",
+                        isSelected = selectedCategory == JobCategory.INCOMING,
+                        onClick = { selectedCategory = JobCategory.INCOMING }
+                    )
+                    CategoryHeader(
+                        title = "Ended",
+                        isSelected = selectedCategory == JobCategory.ENDED,
+                        onClick = { selectedCategory = JobCategory.ENDED }
+                    )
                 }
 
-                // Incoming Jobs Section
-                item {
-                    Text(
-                        text = "Incoming Jobs",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                // Job List
+                when (selectedCategory) {
+                    JobCategory.MANAGING -> JobList(
+                        jobs = managingJobs,
+                        emptyMessage = "No managing jobs.",
+                        onClick = { selectedJob = it },
+                        onAttendanceClick = { selectedAttendanceJob = it }
                     )
-                }
-                if (incomingJobs.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No incoming jobs.",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            fontSize = 16.sp,
-                            color = Color.Gray,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                } else {
-                    items(incomingJobs) { job ->
-                        JobCard(
-                            job = job,
-                            onClick = { selectedJob = job },
-                            onAttendanceClick = { selectedAttendanceJob = job }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-                }
-
-                // Ended Jobs Section
-                item {
-                    Text(
-                        text = "Ended Jobs",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.Black,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                    JobCategory.INCOMING -> JobList(
+                        jobs = incomingJobs,
+                        emptyMessage = "No incoming jobs.",
+                        onClick = { selectedJob = it },
+                        onAttendanceClick = { selectedAttendanceJob = it }
                     )
-                }
-                if (endedJobs.isEmpty()) {
-                    item {
-                        Text(
-                            text = "No ended jobs.",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 16.dp),
-                            fontSize = 16.sp,
-                            color = Color.Gray,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                } else {
-                    items(endedJobs) { job ->
-                        JobCard(
-                            job = job,
-                            onClick = { selectedJob = job },
-                            onAttendanceClick = { selectedAttendanceJob = job }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
+                    JobCategory.ENDED -> JobList(
+                        jobs = endedJobs,
+                        emptyMessage = "No ended jobs.",
+                        onClick = { selectedJob = it },
+                        onAttendanceClick = { selectedAttendanceJob = it }
+                    )
                 }
             }
         }
@@ -391,20 +282,81 @@ fun JobManageScreen(navController: NavController) {
     }
 }
 
+@Composable
+fun CategoryHeader(
+    title: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    Text(
+        text = title,
+        fontSize = 16.sp,
+        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+        color = if (isSelected) GreenMain else GrayText,
+        modifier = Modifier
+            .clickable { onClick() }
+            .padding(vertical = 8.dp, horizontal = 16.dp)
+            .background(
+                if (isSelected) GreenMain.copy(alpha = 0.1f) else Color.Transparent,
+                shape = RoundedCornerShape(8.dp)
+            )
+    )
+}
+
+@RequiresApi(Build.VERSION_CODES.O)
+@Composable
+fun JobList(
+    jobs: List<Job>,
+    emptyMessage: String,
+    onClick: (Job) -> Unit,
+    onAttendanceClick: (Job) -> Unit
+) {
+    if (jobs.isEmpty()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = emptyMessage,
+                fontSize = 16.sp,
+                color = GrayText,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+    } else {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(jobs) { job ->
+                JobCard(
+                    job = job,
+                    onClick = { onClick(job) },
+                    onAttendanceClick = { onAttendanceClick(job) }
+                )
+            }
+        }
+    }
+}
+
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now() // May 09, 2025
+    val today = LocalDate.now()
     val startDate = try {
         LocalDate.parse(job.dateStart, formatter)
     } catch (e: Exception) {
-        LocalDate.now().minusDays(1) // Fallback to ensure no crash
+        LocalDate.now().minusDays(1)
     }
     val endDate = try {
         LocalDate.parse(job.dateEnd, formatter)
     } catch (e: Exception) {
-        LocalDate.now().plusDays(1) // Fallback to ensure no crash
+        LocalDate.now().plusDays(1)
     }
     val isActive = !today.isBefore(startDate) && !today.isAfter(endDate)
 
@@ -415,7 +367,7 @@ fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) Color(0xFFE8F5E9) else Color.White // Light green for active jobs
+            containerColor = if (isActive) GreenLight else Color.White
         )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -438,7 +390,7 @@ fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
                 ) {
                     Text(
                         text = "No Image",
-                        color = Color.Gray,
+                        color = GrayText,
                         fontSize = 14.sp
                     )
                 }
@@ -447,52 +399,53 @@ fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
 
             Text(
                 text = job.name,
-                style = MaterialTheme.typography.titleMedium,
+                fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.Black
             )
             Text(
                 text = job.type.name,
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Gray
+                fontSize = 14.sp,
+                color = GrayText
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = job.detail,
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 14.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Salary: $${job.salary}",
-                style = MaterialTheme.typography.bodyMedium
+                fontSize = 14.sp
             )
             Text(
                 text = "Insurance: $${job.insurance}",
-                style = MaterialTheme.typography.bodyMedium
+                fontSize = 14.sp
             )
             Text(
                 text = "Working Hours: ${job.workingHoursStart} - ${job.workingHoursEnd}",
-                style = MaterialTheme.typography.bodySmall
+                fontSize = 12.sp
             )
             Text(
                 text = "Date: ${job.dateStart} to ${job.dateEnd}",
-                style = MaterialTheme.typography.bodySmall
+                fontSize = 12.sp
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "Employees: ${job.employees.size}/${job.employeeRequired}",
-                style = MaterialTheme.typography.bodyMedium,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = if (job.employees.size >= job.employeeRequired) Color.Red else Color.Black
             )
             if (isActive) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = onAttendanceClick,
+
+                        Button(
+                        onClick = onAttendanceClick,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF4CAF50), // Green for attendance
+                        containerColor = GreenMain,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp),
@@ -609,7 +562,7 @@ fun EmployeeManagementDialog(
             ) {
                 Text(
                     text = "Manage Employees for ${job.name}",
-                    style = MaterialTheme.typography.titleLarge,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )
@@ -617,8 +570,8 @@ fun EmployeeManagementDialog(
                 if (employees.isEmpty()) {
                     Text(
                         text = "No employees assigned",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        color = GrayText,
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -688,12 +641,12 @@ fun EmployeeManagementDialog(
                     onClick = onDismiss,
                     modifier = Modifier.align(Alignment.End),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1976D2),
+                        containerColor = GreenMain,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text(text = "Close")
+                    Text(text = "Close", fontSize = 14.sp)
                 }
             }
         }
@@ -714,7 +667,7 @@ fun AttendanceDialog(
     var qrCodeBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var qrCodeText by remember { mutableStateOf<String?>(null) }
     val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now() // May 09, 2025
+    val today = LocalDate.now()
     val todayStr = today.format(formatter)
 
     LaunchedEffect(job.id) {
@@ -723,7 +676,6 @@ fun AttendanceDialog(
             val attendanceMap = mutableMapOf<String, AttendanceStatus>()
             val nameMap = mutableMapOf<String, String>()
             for (employee in job.employees) {
-                // Fetch employee name
                 val userDoc = firestore.collection("users")
                     .document(employee.id)
                     .get()
@@ -731,7 +683,6 @@ fun AttendanceDialog(
                 val name = userDoc.getString("name") ?: "Unknown"
                 nameMap[employee.id] = name
 
-                // Fetch attendance
                 val attendanceDocs = firestore.collection("jobs")
                     .document(job.id)
                     .collection("employees")
@@ -791,7 +742,7 @@ fun AttendanceDialog(
             ) {
                 Text(
                     text = "Attendance for ${job.name} - $todayStr",
-                    style = MaterialTheme.typography.titleLarge,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )
@@ -799,8 +750,8 @@ fun AttendanceDialog(
                 if (employees.isEmpty()) {
                     Text(
                         text = "No employees assigned",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray,
+                        fontSize = 14.sp,
+                        color = GrayText,
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
                     )
@@ -842,7 +793,7 @@ fun AttendanceDialog(
                                 }
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF1976D2),
+                            containerColor = GreenMain,
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(8.dp)
@@ -852,7 +803,7 @@ fun AttendanceDialog(
                     Button(
                         onClick = onDismiss,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF1976D2),
+                            containerColor = GreenMain,
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(8.dp)
@@ -896,7 +847,7 @@ fun QRCodeDialog(
             ) {
                 Text(
                     text = "QR Code for Attendance",
-                    style = MaterialTheme.typography.titleLarge,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )
@@ -911,7 +862,7 @@ fun QRCodeDialog(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = "Code: $qrCodeText",
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
                     color = Color.Black,
                     modifier = Modifier.padding(horizontal = 8.dp)
                 )
@@ -919,7 +870,7 @@ fun QRCodeDialog(
                 Button(
                     onClick = onDismiss,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF1976D2),
+                        containerColor = GreenMain,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp)
@@ -958,17 +909,17 @@ fun EmployeeItem(
             ) {
                 Text(
                     text = "Employee ID: ${employee.id}",
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
                     color = Color.Black
                 )
                 Text(
                     text = "State: $state",
-                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
                     color = when (state) {
-                        "WORKING" -> Color(0xFF4CAF50)
+                        "WORKING" -> GreenMain
                         "APPLYING" -> Color(0xFFFF9800)
                         "DENIED" -> Color.Red
-                        else -> Color.Gray
+                        else -> GrayText
                     }
                 )
             }
@@ -976,7 +927,7 @@ fun EmployeeItem(
                 Button(
                     onClick = onAccept,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF4CAF50),
+                        containerColor = GreenMain,
                         contentColor = Color.White
                     ),
                     shape = RoundedCornerShape(8.dp),
@@ -1024,16 +975,16 @@ fun AttendanceItem(
             ) {
                 Text(
                     text = "Employee: $employeeName",
-                    style = MaterialTheme.typography.bodyMedium,
+                    fontSize = 14.sp,
                     color = Color.Black
                 )
                 Text(
                     text = "Attendance: $currentStatus",
-                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 12.sp,
                     color = when (currentStatus) {
-                        AttendanceStatus.PRESENT -> Color(0xFF4CAF50)
+                        AttendanceStatus.PRESENT -> GreenMain
                         AttendanceStatus.ABSENT -> Color.Red
-                        else -> Color.Gray
+                        else -> GrayText
                     }
                 )
             }
