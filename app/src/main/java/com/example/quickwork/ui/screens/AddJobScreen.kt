@@ -204,7 +204,7 @@ fun AddJobScreen(navController: NavController, viewModel: AddJobViewModel = view
             )
         },
         bottomBar = {
-            BottomNavigation(navController = navController, currentScreen = "addJobScreen")
+            ReusableBottomNavBar(navController = navController)
         },
         containerColor = GreenLight
     ) { padding ->

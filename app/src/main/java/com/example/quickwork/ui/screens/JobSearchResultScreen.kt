@@ -45,6 +45,8 @@ import com.example.quickwork.data.models.Address
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
 import com.example.quickwork.data.models.Category
+import com.example.quickwork.data.models.User
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -52,17 +54,33 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.*
-import kotlin.math.ceil
-import kotlin.math.min
+import kotlin.math.*
 
 private val GreenMain = Color(0xFF4CAF50)
 
+// Enum for sorting options, including distance
 enum class SortOption(val displayName: String) {
     SALARY_ASC("Salary: Low to High"),
     SALARY_DESC("Salary: High to Low"),
     DATE_NEWEST("Newest First"),
     DATE_OLDEST("Oldest First"),
-    NAME_ASC("Name: A to Z")
+    NAME_ASC("Name: A to Z"),
+    DISTANCE_ASC("Distance: Nearest First")
+}
+
+// Data class to hold job and its distance
+data class JobWithDistance(val job: Job, val distance: Double?)
+
+// Utility function to calculate distance using Haversine formula
+private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val earthRadius = 6371.0 // Earth's radius in kilometers
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = sin(dLat / 2) * sin(dLat / 2) +
+            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+            sin(dLon / 2) * sin(dLon / 2)
+    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return earthRadius * c
 }
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -74,8 +92,9 @@ fun JobSearchResultsScreen(
     selectedJobType: JobType? = null
 ) {
     val firestore = FirebaseFirestore.getInstance()
+    val auth = FirebaseAuth.getInstance()
     var searchKeyword by remember { mutableStateOf(keyword) }
-    var jobs by remember { mutableStateOf<List<Job>>(emptyList()) }
+    var jobsWithDistance by remember { mutableStateOf<List<JobWithDistance>>(emptyList()) }
     var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
     var selectedCategoryIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var selectedJobTypes by remember { mutableStateOf<List<JobType>>(selectedJobType?.let { listOf(it) } ?: JobType.values().toList()) }
@@ -86,19 +105,33 @@ fun JobSearchResultsScreen(
     var isLoading by remember { mutableStateOf(true) }
     var showFilterSheet by remember { mutableStateOf(false) }
     var currentPage by remember { mutableStateOf(1) }
+    var userLocation by remember { mutableStateOf<Address?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
 
-    val jobsPerPage = 4 // Changed from 20 to 4 jobs per page
-    val totalPages = ceil(jobs.size.toDouble() / jobsPerPage).toInt()
-    val displayedJobs = jobs.subList(
+    val jobsPerPage = 4
+    val totalPages = ceil(jobsWithDistance.size.toDouble() / jobsPerPage).toInt()
+    val displayedJobs = jobsWithDistance.subList(
         fromIndex = (currentPage - 1) * jobsPerPage,
-        toIndex = min(currentPage * jobsPerPage, jobs.size)
+        toIndex = min(currentPage * jobsPerPage, jobsWithDistance.size)
     )
 
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
+    // Load current user's location
+    LaunchedEffect(Unit) {
+        val userId = auth.currentUser?.uid ?: return@LaunchedEffect
+        try {
+            val userDoc = firestore.collection("users").document(userId).get().await()
+            val user = userDoc.toObject(User::class.java)
+            userLocation = user?.address
+        } catch (e: Exception) {
+            Log.e("JobSearchResultsScreen", "Failed to load user location", e)
+        }
+    }
+
+    // Load categories
     LaunchedEffect(Unit) {
         try {
             val querySnapshot = firestore.collection("category").get().await()
@@ -118,7 +151,8 @@ fun JobSearchResultsScreen(
         }
     }
 
-    LaunchedEffect(searchKeyword, selectedCategoryIds, selectedJobTypes, startDate, endDate, startTime, sortOption) {
+    // Load and filter jobs
+    LaunchedEffect(searchKeyword, selectedCategoryIds, selectedJobTypes, startDate, endDate, startTime, sortOption, userLocation) {
         isLoading = true
         currentPage = 1 // Reset to page 1 on filter/sort change
         try {
@@ -143,8 +177,14 @@ fun JobSearchResultsScreen(
                         employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
                         companyName = doc.getString("companyName") ?: "Unknown",
                         categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
-                        address = Address()
-
+                        address = doc.get("address")?.let { addressMap ->
+                            Address(
+                                latitude = (addressMap as Map<*, *>)["latitude"] as? Double ?: 0.0,
+                                longitude = addressMap["longitude"] as? Double ?: 0.0,
+                                address = addressMap["address"] as? String ?: "",
+                                timestamp = addressMap["timestamp"] as? Long ?: 0L
+                            )
+                        } ?: Address()
                     )
                 } catch (e: Exception) {
                     Log.w("JobSearchResultsScreen", "Error parsing job ${doc.id}", e)
@@ -189,13 +229,29 @@ fun JobSearchResultsScreen(
                 keywordPass && categoryPass && typePass && startDatePass && endDatePass && timePass
             }
 
-            jobs = when (sortOption) {
-                SortOption.SALARY_ASC -> filteredJobs.sortedBy { it.salary }
-                SortOption.SALARY_DESC -> filteredJobs.sortedByDescending { it.salary }
-                SortOption.DATE_NEWEST -> filteredJobs.sortedByDescending { it.dateUpload }
-                SortOption.DATE_OLDEST -> filteredJobs.sortedBy { it.dateUpload }
-                SortOption.NAME_ASC -> filteredJobs.sortedBy { it.name.lowercase() }
-            }
+            // Calculate distance for each job
+            jobsWithDistance = filteredJobs.map { job ->
+                val distance = userLocation?.let { userLoc ->
+                    if (job.address.latitude != 0.0 && job.address.longitude != 0.0) {
+                        calculateDistance(
+                            userLoc.latitude,
+                            userLoc.longitude,
+                            job.address.latitude,
+                            job.address.longitude
+                        )
+                    } else {
+                        null
+                    }
+                }
+                JobWithDistance(job, distance)
+            }.sortedWith(when (sortOption) {
+                SortOption.SALARY_ASC -> compareBy { it.job.salary }
+                SortOption.SALARY_DESC -> compareByDescending { it.job.salary }
+                SortOption.DATE_NEWEST -> compareByDescending { it.job.dateUpload }
+                SortOption.DATE_OLDEST -> compareBy { it.job.dateUpload }
+                SortOption.NAME_ASC -> compareBy { it.job.name.lowercase() }
+                SortOption.DISTANCE_ASC -> compareBy(nullsLast()) { it.distance }
+            })
         } catch (e: Exception) {
             Log.e("JobSearchResultsScreen", "Failed to load jobs", e)
         } finally {
@@ -303,7 +359,7 @@ fun JobSearchResultsScreen(
                 ) {
                     CircularProgressIndicator(color = GreenMain)
                 }
-            } else if (jobs.isEmpty()) {
+            } else if (jobsWithDistance.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -323,11 +379,12 @@ fun JobSearchResultsScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    items(displayedJobs) { job ->
+                    items(displayedJobs) { jobWithDistance ->
                         JobItem(
-                            job = job,
+                            job = jobWithDistance.job,
+                            distance = jobWithDistance.distance,
                             categories = categories,
-                            onClick = { navController.navigate("jobDetail/${job.id}") }
+                            onClick = { navController.navigate("jobDetail/${jobWithDistance.job.id}") }
                         )
                     }
                 }
@@ -680,9 +737,8 @@ fun JobSearchResultsScreen(
     }
 }
 
-// JobItem and PaginationControl remain unchanged from the original code
 @Composable
-fun JobItem(job: Job, categories: List<Category>, onClick: () -> Unit) {
+fun JobItem(job: Job, distance: Double?, categories: List<Category>, onClick: () -> Unit) {
     var scale by remember { mutableStateOf(1f) }
     Card(
         modifier = Modifier
@@ -752,6 +808,14 @@ fun JobItem(job: Job, categories: List<Category>, onClick: () -> Unit) {
                     fontWeight = FontWeight.Medium,
                     fontSize = 14.sp
                 )
+                Text(
+                    text = "Distance: ${
+                        distance?.let { String.format("%.2f km", it) } ?: "Unknown"
+                    }",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                )
                 val categoryNames = job.categoryIds.mapNotNull { catId ->
                     categories.find { it.id == catId }?.name
                 }.joinToString(", ")
@@ -779,7 +843,6 @@ fun PaginationControl(
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Previous Button
         TextButton(
             onClick = { if (currentPage > 1) onPageChange(currentPage - 1) },
             enabled = currentPage > 1,
@@ -793,7 +856,6 @@ fun PaginationControl(
             )
         }
 
-        // Page Numbers
         val maxPagesToShow = 5
         val pageRange = when {
             totalPages <= maxPagesToShow -> 1..totalPages
@@ -859,7 +921,6 @@ fun PaginationControl(
             )
         }
 
-        // Next Button
         TextButton(
             onClick = { if (currentPage < totalPages) onPageChange(currentPage + 1) },
             enabled = currentPage < totalPages,

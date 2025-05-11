@@ -132,7 +132,7 @@ fun Header(navController: NavController) {
                                     keyboardActions = KeyboardActions(
                                         onSearch = {
                                             if (keyword.isNotBlank()) {
-                                                navController.navigate("jobSearchResult/${keyword.trim()}")
+                                                navController.navigate("jobSearchResult/${keyword.trim()}/")
                                                 keyword = ""
                                                 showSearch = false
                                             }
