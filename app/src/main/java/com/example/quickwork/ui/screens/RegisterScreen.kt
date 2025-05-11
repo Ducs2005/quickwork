@@ -13,12 +13,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.quickwork.data.models.*
@@ -27,31 +27,30 @@ import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
-import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.encodeToString
 
 @Composable
-fun RegisterScreen(navController: NavController) {
+fun RegisterScreen(navController: NavController, viewModel: RegisterViewModel = viewModel()) {
     val backgroundColor = Color(0xFFB3E5FC) // Light blue for header
     val cardBackgroundColor = Color(0xFFE8F5E9) // Light green for card
     val buttonColor = Color(0xFF81C784) // Green for buttons
 
-    var currentStep by remember { mutableStateOf(0) }
-    var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var confirmPasswordVisible by remember { mutableStateOf(false) }
-    var userType by remember { mutableStateOf(UserType.EMPLOYEE) }
-    var address by remember { mutableStateOf(Address()) } // Address object
-    var educationLevel by remember { mutableStateOf(EducationLevel.NONE) } // Enum
-    var languageCertificate by remember { mutableStateOf(LanguageCertificate.NONE) } // Enum
-    var companyName by remember { mutableStateOf("") } // For Employer
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
+    // Collect state from ViewModel
+    val currentStep by viewModel.currentStep.collectAsState()
+    val name by viewModel.name.collectAsState()
+    val email by viewModel.email.collectAsState()
+    val phone by viewModel.phone.collectAsState()
+    val password by viewModel.password.collectAsState()
+    val confirmPassword by viewModel.confirmPassword.collectAsState()
+    val passwordVisible by viewModel.passwordVisible.collectAsState()
+    val confirmPasswordVisible by viewModel.confirmPasswordVisible.collectAsState()
+    val userType by viewModel.userType.collectAsState()
+    val address by viewModel.address.collectAsState()
+    val educationLevel by viewModel.educationLevel.collectAsState()
+    val languageCertificate by viewModel.languageCertificate.collectAsState()
+    val companyName by viewModel.companyName.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
     val coroutineScope = rememberCoroutineScope()
     val auth = FirebaseAuth.getInstance()
@@ -61,7 +60,8 @@ fun RegisterScreen(navController: NavController) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     LaunchedEffect(navBackStackEntry) {
         navBackStackEntry?.savedStateHandle?.get<String>("selectedAddress")?.let { addressJson ->
-            address = Json.decodeFromString<Address>(addressJson) // No need for .serializer()
+            val selectedAddress = Json.decodeFromString<Address>(addressJson)
+            viewModel.updateAddress(selectedAddress)
             navBackStackEntry?.savedStateHandle?.remove<String>("selectedAddress")
         }
     }
@@ -130,7 +130,7 @@ fun RegisterScreen(navController: NavController) {
                 Text(
                     text = steps[currentStep],
                     fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                     color = buttonColor,
                     modifier = Modifier.padding(bottom = 16.dp)
                 )
@@ -165,33 +165,33 @@ fun RegisterScreen(navController: NavController) {
                                 InputField(
                                     label = "Full Name",
                                     value = name,
-                                    onValueChange = { name = it }
+                                    onValueChange = { viewModel.updateName(it) }
                                 )
                                 InputField(
                                     label = "Email",
                                     value = email,
-                                    onValueChange = { email = it }
+                                    onValueChange = { viewModel.updateEmail(it) }
                                 )
                                 InputField(
                                     label = "Phone Number",
                                     value = phone,
-                                    onValueChange = { phone = it }
+                                    onValueChange = { viewModel.updatePhone(it) }
                                 )
                             }
                             1 -> { // Credentials & Type: 3 fields
                                 PasswordField(
                                     label = "Password",
                                     password = password,
-                                    onPasswordChange = { password = it },
+                                    onPasswordChange = { viewModel.updatePassword(it) },
                                     passwordVisible = passwordVisible,
-                                    onVisibilityChange = { passwordVisible = !passwordVisible }
+                                    onVisibilityChange = { viewModel.togglePasswordVisibility() }
                                 )
                                 PasswordField(
                                     label = "Confirm Password",
                                     password = confirmPassword,
-                                    onPasswordChange = { confirmPassword = it },
+                                    onPasswordChange = { viewModel.updateConfirmPassword(it) },
                                     passwordVisible = confirmPasswordVisible,
-                                    onVisibilityChange = { confirmPasswordVisible = !confirmPasswordVisible }
+                                    onVisibilityChange = { viewModel.toggleConfirmPasswordVisibility() }
                                 )
                                 Text(
                                     text = "Select Account Type:",
@@ -202,7 +202,7 @@ fun RegisterScreen(navController: NavController) {
                                     UserType.values().forEach { type ->
                                         FilterChip(
                                             selected = userType == type,
-                                            onClick = { userType = type },
+                                            onClick = { viewModel.updateUserType(type) },
                                             label = { Text(type.name) },
                                             shape = RoundedCornerShape(20.dp),
                                             colors = FilterChipDefaults.filterChipColors(
@@ -230,26 +230,26 @@ fun RegisterScreen(navController: NavController) {
                                         color = Color.Black,
                                         textAlign = TextAlign.Center
                                     )
-                                    Text(
-                                        text = "Coordinates: (${address.latitude}, ${address.longitude})",
-                                        fontSize = 14.sp,
-                                        color = Color.Gray
-                                    )
+//                                    Text(
+//                                        text = "Coordinates: (${address.latitude}, ${address.longitude})",
+//                                        fontSize = 14.sp,
+//                                        color = Color.Gray
+//                                    )
                                 }
                                 if (userType == UserType.EMPLOYEE) {
                                     EducationLevelDropdown(
                                         selectedLevel = educationLevel,
-                                        onLevelChange = { educationLevel = it }
+                                        onLevelChange = { viewModel.updateEducationLevel(it) }
                                     )
                                     LanguageCertificateDropdown(
                                         selectedCertificate = languageCertificate,
-                                        onCertificateChange = { languageCertificate = it }
+                                        onCertificateChange = { viewModel.updateLanguageCertificate(it) }
                                     )
                                 } else {
                                     InputField(
                                         label = "Company Name",
                                         value = companyName,
-                                        onValueChange = { companyName = it }
+                                        onValueChange = { viewModel.updateCompanyName(it) }
                                     )
                                 }
                             }
@@ -286,8 +286,8 @@ fun RegisterScreen(navController: NavController) {
                     Button(
                         onClick = {
                             if (currentStep > 0) {
-                                currentStep--
-                                errorMessage = null
+                                viewModel.updateCurrentStep(currentStep - 1)
+                                viewModel.setErrorMessage(null)
                             } else {
                                 navController.popBackStack()
                             }
@@ -306,41 +306,43 @@ fun RegisterScreen(navController: NavController) {
                     Button(
                         onClick = {
                             // Validate current step
-                            errorMessage = when (currentStep) {
-                                0 -> {
-                                    when {
-                                        name.isBlank() -> "Full Name is required"
-                                        email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Valid Email is required"
-                                        phone.isBlank() -> "Phone Number is required"
-                                        else -> null
+                            viewModel.setErrorMessage(
+                                when (currentStep) {
+                                    0 -> {
+                                        when {
+                                            name.isBlank() -> "Full Name is required"
+                                            email.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Valid Email is required"
+                                            phone.isBlank() -> "Phone Number is required"
+                                            else -> null
+                                        }
                                     }
-                                }
-                                1 -> {
-                                    when {
-                                        password.isBlank() -> "Password is required"
-                                        password != confirmPassword -> "Passwords do not match"
-                                        else -> null
+                                    1 -> {
+                                        when {
+                                            password.isBlank() -> "Password is required"
+                                            password != confirmPassword -> "Passwords do not match"
+                                            else -> null
+                                        }
                                     }
-                                }
-                                2 -> {
-                                    when {
-                                        address.address.isEmpty() -> "Address is required"
-                                        userType == UserType.EMPLOYEE && educationLevel == EducationLevel.NONE -> "Education Level is required"
-                                        userType == UserType.EMPLOYER && companyName.isBlank() -> "Company Name is required"
-                                        else -> null
+                                    2 -> {
+                                        when {
+                                            address.address.isEmpty() -> "Address is required"
+                                            userType == UserType.EMPLOYEE && educationLevel == EducationLevel.NONE -> "Education Level is required"
+                                            userType == UserType.EMPLOYER && companyName.isBlank() -> "Company Name is required"
+                                            else -> null
+                                        }
                                     }
+                                    3 -> null // Review step
+                                    else -> null
                                 }
-                                3 -> null // Review step
-                                else -> null
-                            }
+                            )
 
                             if (errorMessage == null) {
                                 if (currentStep < steps.size - 1) {
-                                    currentStep++
+                                    viewModel.updateCurrentStep(currentStep + 1)
                                 } else {
                                     // Submit
                                     coroutineScope.launch {
-                                        isLoading = true
+                                        viewModel.setLoading(true)
                                         try {
                                             // Create user with Firebase Auth
                                             val authResult = auth.createUserWithEmailAndPassword(email, password).await()
@@ -379,9 +381,9 @@ fun RegisterScreen(navController: NavController) {
                                                 }
                                             }
                                         } catch (e: Exception) {
-                                            errorMessage = e.message ?: "Registration failed"
+                                            viewModel.setErrorMessage(e.message ?: "Registration failed")
                                         } finally {
-                                            isLoading = false
+                                            viewModel.setLoading(false)
                                         }
                                     }
                                 }
@@ -569,7 +571,7 @@ fun ReviewStep(
         ReviewItem("Phone Number", phone)
         ReviewItem("User Type", userType.name)
         ReviewItem("Address", address.address)
-        ReviewItem("Coordinates", "(${address.latitude}, ${address.longitude})")
+        //ReviewItem("Coordinates", "(${address.latitude}, ${address.longitude})")
         if (userType == UserType.EMPLOYEE) {
             ReviewItem("Education Level", educationLevel.name.replace("_", " ").lowercase().capitalize())
             ReviewItem("Language Certificate", languageCertificate.name.replace("_", " ").lowercase().capitalize())
@@ -578,3 +580,4 @@ fun ReviewStep(
         }
     }
 }
+

@@ -1,8 +1,13 @@
 package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.net.Uri
 import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,20 +23,27 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.example.quickwork.data.models.Rating
-import com.example.quickwork.data.models.User
-import com.example.quickwork.data.models.UserType
+import com.example.quickwork.data.models.*
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.UserProfileChangeRequest
 import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import org.threeten.bp.LocalDate
 import org.threeten.bp.format.DateTimeFormatter
-
+import java.io.DataOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 private val GreenMain = Color(0xFF4CAF50) // Primary green color
 private val GreenLight = Color(0xFFE8F5E9) // Light green for backgrounds
@@ -40,11 +52,20 @@ private val GrayText = Color(0xFF616161) // Gray for secondary text
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(userId: String, navController: NavController) {
+fun ProfileScreen(userId: String?, navController: NavController) {
     val firestore = FirebaseFirestore.getInstance()
+    val auth = FirebaseAuth.getInstance()
     var user by remember { mutableStateOf<User?>(null) }
     var ratings by remember { mutableStateOf<List<Rating>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var isEditing by remember { mutableStateOf(false) }
+    var editedUser by remember { mutableStateOf<User?>(null) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    // Determine effective user ID (current user if userId is null/empty)
+    val effectiveUserId = userId.takeIf { !it.isNullOrEmpty() } ?: auth.currentUser?.uid
+    val isCurrentUser = effectiveUserId == auth.currentUser?.uid
+    val context = LocalContext.current
 
     // Calculate average rating
     val averageRating by remember(ratings) {
@@ -54,16 +75,33 @@ fun ProfileScreen(userId: String, navController: NavController) {
         }
     }
 
+    // Coroutine scope for async operations
+    val coroutineScope = rememberCoroutineScope()
+
+    // Image picker for avatar
+    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        selectedImageUri = uri
+    }
+
     // Fetch user data and ratings
-    LaunchedEffect(userId) {
+    LaunchedEffect(effectiveUserId) {
+        if (effectiveUserId == null) {
+            loading = false
+            errorMessage = "No user logged in"
+            return@LaunchedEffect
+        }
         try {
             // Fetch user data
-            val userDoc = firestore.collection("users").document(userId).get().await()
-            user = userDoc.toObject(User::class.java)
+            val userDoc = firestore.collection("users").document(effectiveUserId).get().await()
+            user = userDoc.toObject(User::class.java)?.copy(uid = effectiveUserId)
+            if (isCurrentUser && user != null) {
+                editedUser = user // Initialize editable user
+            }
 
             // Fetch ratings
             val ratingDocs = firestore.collection("users")
-                .document(userId)
+                .document(effectiveUserId)
                 .collection("rated")
                 .get()
                 .await()
@@ -83,8 +121,46 @@ fun ProfileScreen(userId: String, navController: NavController) {
             }
         } catch (e: Exception) {
             Log.e("ProfileScreen", "Failed to load user data or ratings", e)
+            errorMessage = "Failed to load profile: ${e.message}"
         } finally {
             loading = false
+        }
+    }
+
+    // Upload avatar to Cloudinary when selected
+    LaunchedEffect(selectedImageUri) {
+        if (selectedImageUri != null && effectiveUserId != null) {
+            try {
+                var downloadUrl = ""
+                CoroutineScope(Dispatchers.Main).launch {
+                    try {
+                            // Switch to IO thread for network operation
+                            loading = true
+                            withContext(Dispatchers.IO) {
+                            // Perform your network operation here
+                            // Example: uploading to Cloudinary
+                            downloadUrl = uploadImageToCloudinary(context, selectedImageUri!!).toString()
+                            if (downloadUrl != null) {
+                            editedUser = editedUser?.copy(avatarUrl = downloadUrl)
+                            // Update Firestore immediately
+                            firestore.collection("users").document(effectiveUserId)
+                                .update("avatarUrl", downloadUrl).await()
+                            user = user?.copy(avatarUrl = downloadUrl)
+                            loading = false
+
+                            } else {
+                            errorMessage = "Failed to upload avatar"
+                        }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()  // Handle exceptions here
+                    }
+                }
+
+
+            } catch (e: Exception) {
+                errorMessage = "Failed to upload avatar: ${e.message}"
+            }
         }
     }
 
@@ -93,7 +169,7 @@ fun ProfileScreen(userId: String, navController: NavController) {
             TopAppBar(
                 title = {
                     Text(
-                        user?.name ?: "Profile",
+                        user?.name ?: if (isCurrentUser) "My Profile" else "Profile",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White
@@ -106,6 +182,17 @@ fun ProfileScreen(userId: String, navController: NavController) {
                             contentDescription = "Back",
                             tint = Color.White
                         )
+                    }
+                },
+                actions = {
+                    if (isCurrentUser && !isEditing) {
+                        IconButton(onClick = { isEditing = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Profile",
+                                tint = Color.White
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -138,7 +225,7 @@ fun ProfileScreen(userId: String, navController: NavController) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "User not found",
+                        text = errorMessage ?: "User not found",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.Red
@@ -174,6 +261,13 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                         modifier = Modifier
                                             .size(64.dp)
                                             .clip(CircleShape)
+                                            .then(
+                                                if (isCurrentUser && isEditing) {
+                                                    Modifier.clickable { imagePicker.launch("image/*") }
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
                                     ) {
                                         if (!user!!.avatarUrl.isNullOrBlank()) {
                                             AsyncImage(
@@ -183,8 +277,7 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                                     .size(64.dp)
                                                     .clip(CircleShape),
                                                 contentScale = ContentScale.Crop,
-                                                placeholder = null,
-
+                                                placeholder = null
                                             )
                                         } else {
                                             Icon(
@@ -197,12 +290,22 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                             )
                                         }
                                     }
-                                    Text(
-                                        text = user!!.name,
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.Black
-                                    )
+                                    if (isEditing) {
+                                        OutlinedTextField(
+                                            value = editedUser?.name ?: "",
+                                            onValueChange = { editedUser = editedUser?.copy(name = it) },
+                                            label = { Text("Name") },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = user!!.name,
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.Black
+                                        )
+                                    }
                                 }
 
                                 // User Details
@@ -248,11 +351,21 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                         tint = GreenMain,
                                         modifier = Modifier.size(20.dp)
                                     )
-                                    Text(
-                                        text = "Phone: ${user!!.phone}",
-                                        fontSize = 14.sp,
-                                        color = GrayText
-                                    )
+                                    if (isEditing) {
+                                        OutlinedTextField(
+                                            value = editedUser?.phone ?: "",
+                                            onValueChange = { editedUser = editedUser?.copy(phone = it) },
+                                            label = { Text("Phone") },
+                                            shape = RoundedCornerShape(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = "Phone: ${user!!.phone}",
+                                            fontSize = 14.sp,
+                                            color = GrayText
+                                        )
+                                    }
                                 }
 
                                 // Employee-specific fields
@@ -274,11 +387,18 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                             tint = GreenMain,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        Text(
-                                            text = "Education: ${user!!.education}",
-                                            fontSize = 14.sp,
-                                            color = GrayText
-                                        )
+                                        if (isEditing) {
+                                            EducationLevelDropdown(
+                                                selectedLevel = editedUser?.education ?: EducationLevel.NONE,
+                                                onLevelChange = { editedUser = editedUser?.copy(education = it) }
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Education: ${user!!.education}",
+                                                fontSize = 14.sp,
+                                                color = GrayText
+                                            )
+                                        }
                                     }
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -290,11 +410,18 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                             tint = GreenMain,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        Text(
-                                            text = "Language Certificate: ${user!!.languageCertificate}",
-                                            fontSize = 14.sp,
-                                            color = GrayText
-                                        )
+                                        if (isEditing) {
+                                            LanguageCertificateDropdown(
+                                                selectedCertificate = editedUser?.languageCertificate ?: LanguageCertificate.NONE,
+                                                onCertificateChange = { editedUser = editedUser?.copy(languageCertificate = it) }
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Language Certificate: ${user!!.languageCertificate}",
+                                                fontSize = 14.sp,
+                                                color = GrayText
+                                            )
+                                        }
                                     }
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
@@ -333,33 +460,132 @@ fun ProfileScreen(userId: String, navController: NavController) {
                                             tint = GreenMain,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        Text(
-                                            text = "Company: ${user!!.companyName}",
-                                            fontSize = 14.sp,
-                                            color = GrayText
-                                        )
+                                        if (isEditing) {
+                                            OutlinedTextField(
+                                                value = editedUser?.companyName ?: "",
+                                                onValueChange = { editedUser = editedUser?.copy(companyName = it) },
+                                                label = { Text("Company Name") },
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Company: ${user!!.companyName}",
+                                                fontSize = 14.sp,
+                                                color = GrayText
+                                            )
+                                        }
                                     }
                                 }
 
-                                // Contact Button
-                                Spacer(modifier = Modifier.height(16.dp))
-                                Button(
-                                    onClick = { navController.navigate("chat/$userId") },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(48.dp)
-                                        .shadow(4.dp, RoundedCornerShape(8.dp)),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = GreenMain,
-                                        contentColor = Color.White
-                                    ),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Text(
-                                        text = "Contact",
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
+                                // Edit/Save/Cancel Buttons
+                                if (isEditing) {
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    errorMessage?.let {
+                                        Text(
+                                            text = it,
+                                            color = Color.Red,
+                                            fontSize = 14.sp,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                isEditing = false
+                                                editedUser = user // Reset to original
+                                                selectedImageUri = null
+                                                errorMessage = null
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .padding(end = 8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color.Gray,
+                                                contentColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Cancel", fontSize = 16.sp)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    try {
+                                                        // Validate
+                                                        if (editedUser?.name?.isBlank() == true) {
+                                                            errorMessage = "Name is required"
+                                                            return@launch
+                                                        }
+                                                        if (editedUser?.phone?.isBlank() == true) {
+                                                            errorMessage = "Phone is required"
+                                                            return@launch
+                                                        }
+                                                        if (user!!.userType == UserType.EMPLOYER && editedUser?.companyName?.isBlank() == true) {
+                                                            errorMessage = "Company Name is required"
+                                                            return@launch
+                                                        }
+
+                                                        // Update Firebase Auth profile
+                                                        auth.currentUser?.updateProfile(
+                                                            UserProfileChangeRequest.Builder()
+                                                                .setDisplayName(editedUser?.name)
+                                                                .setPhotoUri(editedUser?.avatarUrl?.let { Uri.parse(it) })
+                                                                .build()
+                                                        )?.await()
+
+                                                        // Update Firestore
+                                                        firestore.collection("users").document(effectiveUserId!!)
+                                                            .set(editedUser!!).await()
+
+                                                        // Update UI
+                                                        user = editedUser
+                                                        isEditing = false
+                                                        errorMessage = null
+                                                    } catch (e: Exception) {
+                                                        errorMessage = "Failed to save changes: ${e.message}"
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(48.dp)
+                                                .padding(start = 8.dp),
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = GreenMain,
+                                                contentColor = Color.White
+                                            ),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Text("Save", fontSize = 16.sp)
+                                        }
+                                    }
+                                } else if (!isCurrentUser) {
+                                    // Contact Button for other users
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Button(
+                                        onClick = { navController.navigate("chat/$effectiveUserId") },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(48.dp)
+                                            .shadow(4.dp, RoundedCornerShape(8.dp)),
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = GreenMain,
+                                            contentColor = Color.White
+                                        ),
+                                        shape = RoundedCornerShape(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Contact",
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -502,3 +728,85 @@ fun RatingItem(rating: Rating) {
         }
     }
 }
+//
+//@Composable
+//fun EducationLevelDropdown(
+//    selectedLevel: EducationLevel,
+//    onLevelChange: (EducationLevel) -> Unit
+//) {
+//    var expanded by remember { mutableStateOf(false) }
+//    Box {
+//        OutlinedTextField(
+//            value = selectedLevel.name.replace("_", " ").lowercase().capitalize(),
+//            onValueChange = {},
+//            label = { Text("Education Level") },
+//            shape = RoundedCornerShape(8.dp),
+//            modifier = Modifier.fillMaxWidth(),
+//            readOnly = true,
+//            trailingIcon = {
+//                IconButton(onClick = { expanded = !expanded }) {
+//                    Icon(
+//                        imageVector = if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+//                        contentDescription = "Toggle dropdown"
+//                    )
+//                }
+//            }
+//        )
+//        DropdownMenu(
+//            expanded = expanded,
+//            onDismissRequest = { expanded = false },
+//            modifier = Modifier.fillMaxWidth()
+//        ) {
+//            EducationLevel.values().forEach { level ->
+//                DropdownMenuItem(
+//                    text = { Text(level.name.replace("_", " ").lowercase().capitalize()) },
+//                    onClick = {
+//                        onLevelChange(level)
+//                        expanded = false
+//                    }
+//                )
+//            }
+//        }
+//    }
+//}
+//
+//@Composable
+//fun LanguageCertificateDropdown(
+//    selectedCertificate: LanguageCertificate,
+//    onCertificateChange: (LanguageCertificate) -> Unit
+//) {
+//    var expanded by remember { mutableStateOf(false) }
+//    Box {
+//        OutlinedTextField(
+//            value = selectedCertificate.name.replace("_", " ").lowercase().capitalize(),
+//            onValueChange = {},
+//            label = { Text("Language Certificate") },
+//            shape = RoundedCornerShape(8.dp),
+//            modifier = Modifier.fillMaxWidth(),
+//            readOnly = true,
+//            trailingIcon = {
+//                IconButton(onClick = { expanded = !expanded }) {
+//                    Icon(
+//                        imageVector = if (expanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+//                        contentDescription = "Toggle dropdown"
+//                    )
+//                }
+//            }
+//        )
+//        DropdownMenu(
+//            expanded = expanded,
+//            onDismissRequest = { expanded = false },
+//            modifier = Modifier.fillMaxWidth()
+//        ) {
+//            LanguageCertificate.values().forEach { cert ->
+//                DropdownMenuItem(
+//                    text = { Text(cert.name.replace("_", " ").lowercase().capitalize()) },
+//                    onClick = {
+//                        onCertificateChange(cert)
+//                        expanded = false
+//                    }
+//                )
+//            }
+//        }
+//    }
+//}

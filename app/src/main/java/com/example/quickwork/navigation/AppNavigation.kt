@@ -37,7 +37,7 @@ fun SetupNavGraph(navController: NavHostController) {
                 "login"
             }
         }
-        targetDestination = "register"
+       // targetDestination = "register"
     }
 
     // Always start from splash

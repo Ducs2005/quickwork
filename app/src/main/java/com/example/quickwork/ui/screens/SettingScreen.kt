@@ -82,7 +82,7 @@ fun SettingScreen(navController: NavController) {
                     description = item.description,
                     onClick = {
                         when (item.title) {
-                            "Language" -> navController.navigate("language")
+                            "Account" -> navController.navigate("profile/")
                             "Notifications" -> navController.navigate("notifications")
                             else -> Log.d("SettingScreen", "Clicked on ${item.title} (no action implemented)")
                         }
