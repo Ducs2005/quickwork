@@ -7,8 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -80,7 +78,8 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     employees = emptyList(),
                     employeeRequired = document.getLong("employeeRequired")?.toInt() ?: 0,
                     companyName = document.getString("companyName") ?: "Unknown",
-                    categoryIds = document.get("categoryIds") as? List<String> ?: emptyList()
+                    categoryIds = document.get("categoryIds") as? List<String> ?: emptyList(),
+                    address = Address()
                 )
 
                 // Fetch employer name from user document

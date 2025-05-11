@@ -9,7 +9,7 @@ data class User(
     val email: String = "",
     val phone: String = "",
     val userType: UserType = UserType.EMPLOYEE,
-    val address: Address = Address(), // Updated to use Address data class
+    val address: Address, // Updated to use Address data class
 
     // Merged Employee fields
     val education: EducationLevel = EducationLevel.NONE,

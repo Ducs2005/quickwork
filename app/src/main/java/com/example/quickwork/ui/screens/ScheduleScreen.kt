@@ -8,20 +8,14 @@ import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.navigation.NavController
 import com.example.quickwork.ScanActivity
+import com.example.quickwork.data.models.Address
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
 import com.example.quickwork.ui.components.BottomNavigation
@@ -41,7 +36,6 @@ import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.WeekFields
-import java.util.*
 
 private val GreenMain = Color(0xFF4CAF50)
 
@@ -109,7 +103,9 @@ fun ScheduleScreen(navController: NavController) {
                                         employeeRequired = jobDoc.getLong("employeeRequired")?.toInt() ?: 0,
                                         companyName = jobDoc.getString("companyName") ?: "Unknown",
                                         categoryIds = jobDoc.get("categoryIds") as? List<String> ?: emptyList(),
-                                        attendanceCode = jobDoc.getString("attendanceCode")
+                                        attendanceCode = jobDoc.getString("attendanceCode"),
+                                        address = Address()
+
                                     )
                                 )
                             }

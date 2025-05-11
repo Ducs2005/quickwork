@@ -1,5 +1,6 @@
 package com.example.quickwork.data.models
 
+
 enum class AttendanceStatus {
     PRESENT, LATE, ABSENT
 }
@@ -44,5 +45,6 @@ data class Job(
     val categoryIds: List<String> = emptyList(),
     val attendanceCode: String? = null,
     val educationRequired: EducationLevel? = null,
-    val languageRequired: LanguageCertificate? = null
+    val languageRequired: LanguageCertificate? = null,
+    val address: Address
 )

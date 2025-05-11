@@ -20,7 +20,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -156,7 +155,9 @@ fun JobManageScreen(navController: NavController) {
                                 employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
                                 companyName = doc.getString("companyName") ?: "Unknown",
                                 categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
-                                attendanceCode = doc.getString("attendanceCode")
+                                attendanceCode = doc.getString("attendanceCode"),
+                                address = Address()
+
                             )
                         }
                         isLoading = false

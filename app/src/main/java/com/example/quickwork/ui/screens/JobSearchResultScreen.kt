@@ -6,7 +6,6 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.quickwork.R
+import com.example.quickwork.data.models.Address
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
 import com.example.quickwork.data.models.Category
@@ -142,7 +142,9 @@ fun JobSearchResultsScreen(
                         employees = emptyList(),
                         employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
                         companyName = doc.getString("companyName") ?: "Unknown",
-                        categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList()
+                        categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
+                        address = Address()
+
                     )
                 } catch (e: Exception) {
                     Log.w("JobSearchResultsScreen", "Error parsing job ${doc.id}", e)

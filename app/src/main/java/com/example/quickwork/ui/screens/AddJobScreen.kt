@@ -17,9 +17,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,6 +29,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -36,15 +39,19 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
-import com.example.quickwork.R
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.quickwork.data.models.*
+import com.example.quickwork.viewModel.AddJobViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.parcelize.Parcelize
+import kotlinx.serialization.Serializable
 import java.io.DataOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -62,38 +69,51 @@ data class Category(
     val name: String = ""
 )
 
+
+
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddJobScreen(navController: NavController) {
+fun AddJobScreen(navController: NavController, viewModel: AddJobViewModel = viewModel()) {
     val coroutineScope = rememberCoroutineScope()
     val auth = FirebaseAuth.getInstance()
     val firestore = FirebaseFirestore.getInstance()
     val currentUser = auth.currentUser
     val context = LocalContext.current
-    var currentStep by remember { mutableStateOf(0) }
-    var userRole by remember { mutableStateOf("employee") } // Default to employee
 
-    // Form state
-    var jobName by remember { mutableStateOf("") }
-    var jobType by remember { mutableStateOf(JobType.PARTTIME) }
-    var jobDetail by remember { mutableStateOf("") }
-    var jobBenefit by remember { mutableStateOf("") }
-    var salary by remember { mutableStateOf("") }
-    var insurance by remember { mutableStateOf("") }
-    var employeeRequired by remember { mutableStateOf("") }
-    var workingHoursStart by remember { mutableStateOf("") }
-    var workingHoursEnd by remember { mutableStateOf("") }
-    var dateStart by remember { mutableStateOf("") }
-    var dateEnd by remember { mutableStateOf("") }
-    var educationRequired by remember { mutableStateOf<EducationLevel?>(null) }
-    var languageRequired by remember { mutableStateOf<LanguageCertificate?>(null) }
-    var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
-    var imageUrl by remember { mutableStateOf<String?>(null) }
+    // Collect state from ViewModel
+    val currentStep by viewModel.currentStep.collectAsState()
+    val jobName by viewModel.jobName.collectAsState()
+    val jobType by viewModel.jobType.collectAsState()
+    val jobDetail by viewModel.jobDetail.collectAsState()
+    val jobBenefit by viewModel.jobBenefit.collectAsState()
+    val salary by viewModel.salary.collectAsState()
+    val insurance by viewModel.insurance.collectAsState()
+    val employeeRequired by viewModel.employeeRequired.collectAsState()
+    val workingHoursStart by viewModel.workingHoursStart.collectAsState()
+    val workingHoursEnd by viewModel.workingHoursEnd.collectAsState()
+    val dateStart by viewModel.dateStart.collectAsState()
+    val dateEnd by viewModel.dateEnd.collectAsState()
+    val educationRequired by viewModel.educationRequired.collectAsState()
+    val languageRequired by viewModel.languageRequired.collectAsState()
+    val address by viewModel.address.collectAsState()
+    val selectedImageUri by viewModel.selectedImageUri.collectAsState()
+    val imageUrl by viewModel.imageUrl.collectAsState()
+    val selectedCategoryIds by viewModel.selectedCategoryIds.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+
+    var userRole by remember { mutableStateOf("employee") }
     var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
-    var selectedCategoryIds by remember { mutableStateOf<List<String>>(emptyList()) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(false) }
+
+    // Handle address result from MapPickerScreen
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    LaunchedEffect(navBackStackEntry) {
+        navBackStackEntry?.savedStateHandle?.get<String>("selectedAddress")?.let { addressJson ->
+            viewModel.handleAddressResult(addressJson)
+            navBackStackEntry?.savedStateHandle?.remove<String>("selectedAddress")
+        }
+    }
 
     // Fetch user role
     LaunchedEffect(currentUser) {
@@ -106,7 +126,7 @@ fun AddJobScreen(navController: NavController) {
                 userRole = userDoc.getString("role") ?: "employee"
             } catch (e: Exception) {
                 Log.e("AddJobScreen", "Failed to fetch user role", e)
-                userRole = "employee" // Default to employee on error
+                userRole = "employee"
             }
         }
     }
@@ -117,9 +137,9 @@ fun AddJobScreen(navController: NavController) {
     val currentDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
     // Image picker
-    val launcher = rememberLauncherForActivityResult(
+    val imageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
-        onResult = { uri -> selectedImageUri = uri }
+        onResult = { uri -> viewModel.updateSelectedImageUri(uri) }
     )
 
     // Fetch categories
@@ -150,21 +170,41 @@ fun AddJobScreen(navController: NavController) {
         "Working Hours",
         "Date Range",
         "Requirements",
+        "Address",
         "Image",
         "Review"
     )
 
     Scaffold(
         topBar = {
-            ReusableTopAppBar(
-                title = "Add New Job",
-                navController = navController,
-                //showBackButton = true
+            TopAppBar(
+                title = {
+                    Text(
+                        "Add New Job",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = GreenMain,
+                    titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
+                ),
+                modifier = Modifier.shadow(8.dp)
             )
         },
         bottomBar = {
-            ReusableBottomNavBar(navController = navController)
-
+            BottomNavigation(navController = navController, currentScreen = "addJobScreen")
         },
         containerColor = GreenLight
     ) { padding ->
@@ -239,59 +279,57 @@ fun AddJobScreen(navController: NavController) {
                     when (currentStep) {
                         0 -> BasicInfoStep(
                             jobName = jobName,
-                            onJobNameChange = { jobName = it },
+                            onJobNameChange = { viewModel.updateJobName(it) },
                             jobType = jobType,
-                            onJobTypeChange = { jobType = it },
+                            onJobTypeChange = { viewModel.updateJobType(it) },
                             categories = categories,
                             selectedCategoryIds = selectedCategoryIds,
-                            onCategoryToggle = { id ->
-                                selectedCategoryIds = if (selectedCategoryIds.contains(id)) {
-                                    selectedCategoryIds - id
-                                } else {
-                                    selectedCategoryIds + id
-                                }
-                            }
+                            onCategoryToggle = { viewModel.toggleCategoryId(it) }
                         )
                         1 -> DetailsStep(
                             jobDetail = jobDetail,
-                            onJobDetailChange = { jobDetail = it },
+                            onJobDetailChange = { viewModel.updateJobDetail(it) },
                             jobBenefit = jobBenefit,
-                            onJobBenefitChange = { jobBenefit = it }
+                            onJobBenefitChange = { viewModel.updateJobBenefit(it) }
                         )
                         2 -> CompensationStep(
                             salary = salary,
-                            onSalaryChange = { salary = it },
+                            onSalaryChange = { viewModel.updateSalary(it) },
                             insurance = insurance,
-                            onInsuranceChange = { insurance = it },
+                            onInsuranceChange = { viewModel.updateInsurance(it) },
                             employeeRequired = employeeRequired,
-                            onEmployeeRequiredChange = { employeeRequired = it }
+                            onEmployeeRequiredChange = { viewModel.updateEmployeeRequired(it) }
                         )
                         3 -> WorkingHoursStep(
                             workingHoursStart = workingHoursStart,
-                            onWorkingHoursStartChange = { workingHoursStart = it },
+                            onWorkingHoursStartChange = { viewModel.updateWorkingHoursStart(it) },
                             workingHoursEnd = workingHoursEnd,
-                            onWorkingHoursEndChange = { workingHoursEnd = it },
+                            onWorkingHoursEndChange = { viewModel.updateWorkingHoursEnd(it) },
                             context = context
                         )
                         4 -> DateRangeStep(
                             dateStart = dateStart,
-                            onDateStartChange = { dateStart = it },
+                            onDateStartChange = { viewModel.updateDateStart(it) },
                             dateEnd = dateEnd,
-                            onDateEndChange = { dateEnd = it },
+                            onDateEndChange = { viewModel.updateDateEnd(it) },
                             context = context
                         )
                         5 -> RequirementsStep(
                             educationRequired = educationRequired,
-                            onEducationChange = { educationRequired = it },
+                            onEducationChange = { viewModel.updateEducationRequired(it) },
                             languageRequired = languageRequired,
-                            onLanguageChange = { languageRequired = it }
+                            onLanguageChange = { viewModel.updateLanguageRequired(it) }
                         )
-                        6 -> ImageStep(
+                        6 -> AddressStep(
+                            address = address,
+                            onSelectAddress = { navController.navigate("mapPicker") }
+                        )
+                        7 -> ImageStep(
                             selectedImageUri = selectedImageUri,
-                            onSelectImage = { launcher.launch("image/*") },
+                            onSelectImage = { imageLauncher.launch("image/*") },
                             context = context
                         )
-                        7 -> ReviewStep(
+                        8 -> ReviewStep(
                             jobName = jobName,
                             jobType = jobType,
                             jobDetail = jobDetail,
@@ -305,6 +343,7 @@ fun AddJobScreen(navController: NavController) {
                             dateEnd = dateEnd,
                             educationRequired = educationRequired,
                             languageRequired = languageRequired,
+                            address = address,
                             selectedCategoryIds = selectedCategoryIds,
                             categories = categories,
                             selectedImageUri = selectedImageUri,
@@ -324,7 +363,7 @@ fun AddJobScreen(navController: NavController) {
                 Button(
                     onClick = {
                         if (currentStep > 0) {
-                            currentStep--
+                            viewModel.updateCurrentStep(currentStep - 1)
                         } else {
                             navController.popBackStack()
                         }
@@ -345,67 +384,73 @@ fun AddJobScreen(navController: NavController) {
                 Button(
                     onClick = {
                         // Validate current step
-                        errorMessage = when (currentStep) {
-                            0 -> {
-                                if (jobName.isBlank()) "Job Title is required"
-                                else if (selectedCategoryIds.isEmpty()) "Select at least one category"
-                                else null
+                        viewModel.setErrorMessage(
+                            when (currentStep) {
+                                0 -> {
+                                    if (jobName.isBlank()) "Job Title is required"
+                                    else if (selectedCategoryIds.isEmpty()) "Select at least one category"
+                                    else null
+                                }
+                                1 -> {
+                                    if (jobDetail.isBlank()) "Job Details are required"
+                                    else if (jobBenefit.isBlank()) "Job Benefits are required"
+                                    else null
+                                }
+                                2 -> {
+                                    if (salary.isBlank() || salary.toIntOrNull() == null) "Valid Salary is required"
+                                    else if (insurance.isBlank() || insurance.toIntOrNull() == null) "Valid Insurance is required"
+                                    else if (employeeRequired.isBlank() || employeeRequired.toIntOrNull() == null) "Valid Number of Employees is required"
+                                    else null
+                                }
+                                3 -> {
+                                    if (!timePattern.matcher(workingHoursStart).matches()) "Start Hours must be in HH:mm format"
+                                    else if (!timePattern.matcher(workingHoursEnd).matches()) "End Hours must be in HH:mm format"
+                                    else null
+                                }
+                                4 -> {
+                                    if (!datePattern.matcher(dateStart).matches()) "Start Date must be in yyyy-MM-dd format"
+                                    else if (!datePattern.matcher(dateEnd).matches()) "End Date must be in yyyy-MM-dd format"
+                                    else null
+                                }
+                                5 -> {
+                                    if (educationRequired == null) "Education Level is required"
+                                    else if (languageRequired == null) "Language Certificate is required"
+                                    else null
+                                }
+                                6 -> {
+                                    if (address.address.isBlank()) "Address is required"
+                                    else null
+                                }
+                                7 -> {
+                                    if (selectedImageUri == null) "Job Image is required"
+                                    else null
+                                }
+                                8 -> null // Review step has no validation
+                                else -> null
                             }
-                            1 -> {
-                                if (jobDetail.isBlank()) "Job Details are required"
-                                else if (jobBenefit.isBlank()) "Job Benefits are required"
-                                else null
-                            }
-                            2 -> {
-                                if (salary.isBlank() || salary.toIntOrNull() == null) "Valid Salary is required"
-                                else if (insurance.isBlank() || insurance.toIntOrNull() == null) "Valid Insurance is required"
-                                else if (employeeRequired.isBlank() || employeeRequired.toIntOrNull() == null) "Valid Number of Employees is required"
-                                else null
-                            }
-                            3 -> {
-                                if (!timePattern.matcher(workingHoursStart).matches()) "Start Hours must be in HH:mm format"
-                                else if (!timePattern.matcher(workingHoursEnd).matches()) "End Hours must be in HH:mm format"
-                                else null
-                            }
-                            4 -> {
-                                if (!datePattern.matcher(dateStart).matches()) "Start Date must be in yyyy-MM-dd format"
-                                else if (!datePattern.matcher(dateEnd).matches()) "End Date must be in yyyy-MM-dd format"
-                                else null
-                            }
-                            5 -> {
-                                if (educationRequired == null) "Education Level is required"
-                                else if (languageRequired == null) "Language Certificate is required"
-                                else null
-                            }
-                            6 -> {
-                                if (selectedImageUri == null) "Job Image is required"
-                                else null
-                            }
-                            7 -> null // Review step has no validation
-                            else -> null
-                        }
+                        )
 
                         if (errorMessage == null) {
                             if (currentStep < steps.size - 1) {
-                                currentStep++
+                                viewModel.updateCurrentStep(currentStep + 1)
                             } else {
                                 // Submit job
                                 coroutineScope.launch {
                                     if (currentUser == null) {
-                                        errorMessage = "You must be logged in to add a job"
+                                        viewModel.setErrorMessage("You must be logged in to add a job")
                                         return@launch
                                     }
-                                    isLoading = true
+                                    viewModel.setLoading(true)
                                     try {
                                         val uploadedUrl = withContext(Dispatchers.IO) {
                                             uploadImageToCloudinary(context, selectedImageUri!!)
                                         }
                                         if (uploadedUrl == null) {
-                                            errorMessage = "Failed to upload image"
-                                            isLoading = false
+                                            viewModel.setErrorMessage("Failed to upload image")
+                                            viewModel.setLoading(false)
                                             return@launch
                                         }
-                                        imageUrl = uploadedUrl
+                                        viewModel.updateImageUrl(uploadedUrl)
 
                                         val job = Job(
                                             id = firestore.collection("jobs").document().id,
@@ -421,11 +466,12 @@ fun AddJobScreen(navController: NavController) {
                                             dateStart = dateStart,
                                             dateEnd = dateEnd,
                                             employeeRequired = employeeRequired.toInt(),
-                                            imageUrl = imageUrl!!,
+                                            imageUrl = uploadedUrl,
                                             companyName = currentUser.displayName ?: "Unknown",
                                             categoryIds = selectedCategoryIds,
                                             educationRequired = educationRequired,
-                                            languageRequired = languageRequired
+                                            languageRequired = languageRequired,
+                                            address = address
                                         )
                                         firestore.collection("jobs")
                                             .document(job.id)
@@ -434,9 +480,9 @@ fun AddJobScreen(navController: NavController) {
                                         Toast.makeText(context, "Job added successfully!", Toast.LENGTH_SHORT).show()
                                         navController.popBackStack()
                                     } catch (e: Exception) {
-                                        errorMessage = e.message ?: "Failed to add job"
+                                        viewModel.setErrorMessage(e.message ?: "Failed to add job")
                                     } finally {
-                                        isLoading = false
+                                        viewModel.setLoading(false)
                                     }
                                 }
                             }
@@ -903,6 +949,36 @@ fun RequirementsStep(
 }
 
 @Composable
+fun AddressStep(
+    address: Address,
+    onSelectAddress: () -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Button(
+            onClick = onSelectAddress,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = GreenMain,
+                contentColor = Color.White
+            ),
+            shape = RoundedCornerShape(8.dp)
+        ) {
+            Text("Select Address from Map", fontSize = 14.sp)
+        }
+        if (address.address.isNotBlank()) {
+            Text(
+                text = "Selected: ${address.address}",
+                fontSize = 14.sp,
+                color = Color.Black,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
 fun ImageStep(
     selectedImageUri: Uri?,
     onSelectImage: () -> Unit,
@@ -951,13 +1027,15 @@ fun ReviewStep(
     dateEnd: String,
     educationRequired: EducationLevel?,
     languageRequired: LanguageCertificate?,
+    address: Address,
     selectedCategoryIds: List<String>,
     categories: List<Category>,
     selectedImageUri: Uri?,
     context: Context
 ) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
@@ -980,6 +1058,7 @@ fun ReviewStep(
         ReviewItem("Date Range", "$dateStart to $dateEnd")
         ReviewItem("Education Required", educationRequired?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "None")
         ReviewItem("Language Required", languageRequired?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "None")
+        ReviewItem("Address", address.address.ifEmpty { "Not selected" })
         selectedImageUri?.let { uri ->
             Image(
                 bitmap = android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri).asImageBitmap(),

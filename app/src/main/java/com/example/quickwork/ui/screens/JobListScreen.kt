@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.quickwork.R
+import com.example.quickwork.data.models.Address
 import com.example.quickwork.data.models.Employee
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
@@ -86,7 +87,9 @@ fun JobListScreen(navController: NavController) {
                                 } ?: emptyList(),
                                 employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
                                 companyName = doc.getString("companyName") ?: "Unknown",
-                                categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList()
+                                categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
+                                address = Address()
+
                             )
                         } catch (e: Exception) {
                             Log.w("JobListScreen", "Error parsing job ${doc.id}", e)

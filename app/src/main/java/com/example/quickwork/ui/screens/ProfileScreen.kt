@@ -134,30 +134,29 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                 var downloadUrl = ""
                 CoroutineScope(Dispatchers.Main).launch {
                     try {
-                            // Switch to IO thread for network operation
-                            loading = true
-                            withContext(Dispatchers.IO) {
+                        // Switch to IO thread for network operation
+                        loading = true
+                        withContext(Dispatchers.IO) {
                             // Perform your network operation here
                             // Example: uploading to Cloudinary
-                            downloadUrl = uploadImageToCloudinary(context, selectedImageUri!!).toString()
+                            downloadUrl =
+                                uploadImageToCloudinary(context, selectedImageUri!!).toString()
                             if (downloadUrl != null) {
-                            editedUser = editedUser?.copy(avatarUrl = downloadUrl)
-                            // Update Firestore immediately
-                            firestore.collection("users").document(effectiveUserId)
-                                .update("avatarUrl", downloadUrl).await()
-                            user = user?.copy(avatarUrl = downloadUrl)
-                            loading = false
+                                editedUser = editedUser?.copy(avatarUrl = downloadUrl)
+                                // Update Firestore immediately
+                                firestore.collection("users").document(effectiveUserId)
+                                    .update("avatarUrl", downloadUrl).await()
+                                user = user?.copy(avatarUrl = downloadUrl)
+                                loading = false
 
                             } else {
-                            errorMessage = "Failed to upload avatar"
-                        }
+                                errorMessage = "Failed to upload avatar"
+                            }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()  // Handle exceptions here
                     }
                 }
-
-
             } catch (e: Exception) {
                 errorMessage = "Failed to upload avatar: ${e.message}"
             }
