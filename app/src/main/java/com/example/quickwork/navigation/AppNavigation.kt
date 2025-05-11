@@ -37,6 +37,7 @@ fun SetupNavGraph(navController: NavHostController) {
                 "login"
             }
         }
+        targetDestination = "register"
     }
 
     // Always start from splash
@@ -53,7 +54,9 @@ fun SetupNavGraph(navController: NavHostController) {
         }
 
         composable("login") { LoginScreen(navController) }
-        //composable("register") { RegisterScreen(navController) }
+        composable("mapPicker") { MapPickerScreen(navController) }
+
+        composable("register") { RegisterScreen(navController) }
         composable("jobList") { JobListScreen(navController) }
         composable("notification") { NotificationScreen(navController) }
         composable("schedule") { ScheduleScreen(navController) }

@@ -3,6 +3,8 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.gms.google-services")
+    id("kotlin-parcelize")
+    id("org.jetbrains.kotlin.plugin.serialization") version "1.9.10" // Make sure to use the latest version of the plugin
 }
 
 android {
@@ -98,6 +100,11 @@ dependencies {
     implementation ("com.google.accompanist:accompanist-pager-indicators:0.32.0")
     implementation ("com.google.accompanist:accompanist-pager:0.32.0")
     //implementation ("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
-
+    implementation ("com.google.android.libraries.places:places:3.3.0")
+    implementation ("com.google.firebase:firebase-bom:33.1.0")
+    //implementation("com.google.maps.android:maps-compose:2.11.4")
+    implementation ("org.osmdroid:osmdroid-android:6.1.18")
+    implementation ("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation ("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
 }

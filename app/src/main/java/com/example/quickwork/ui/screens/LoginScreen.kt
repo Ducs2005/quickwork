@@ -235,33 +235,33 @@ fun LoginScreen(navController: NavController) {
 //}
 
 
-
-@Composable
-fun PasswordField(
-    label: String,
-    password: String,
-    onPasswordChange: (String) -> Unit,
-    passwordVisible: Boolean,
-    onVisibilityChange: () -> Unit
-) {
-    OutlinedTextField(
-        value = password,
-        onValueChange = onPasswordChange,
-        label = { Text(label) },
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
-        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-        trailingIcon = {
-            IconButton(onClick = onVisibilityChange) {
-                Icon(
-                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                    contentDescription = if (passwordVisible) "Hide Password" else "Show Password"
-                )
-            }
-        }
-    )
-}
+//
+//@Composable
+//fun PasswordField(
+//    label: String,
+//    password: String,
+//    onPasswordChange: (String) -> Unit,
+//    passwordVisible: Boolean,
+//    onVisibilityChange: () -> Unit
+//) {
+//    OutlinedTextField(
+//        value = password,
+//        onValueChange = onPasswordChange,
+//        label = { Text(label) },
+//        shape = RoundedCornerShape(12.dp),
+//        modifier = Modifier.fillMaxWidth(),
+//        singleLine = true,
+//        visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+//        trailingIcon = {
+//            IconButton(onClick = onVisibilityChange) {
+//                Icon(
+//                    imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+//                    contentDescription = if (passwordVisible) "Hide Password" else "Show Password"
+//                )
+//            }
+//        }
+//    )
+//}
 
 @Composable
 fun InputField(

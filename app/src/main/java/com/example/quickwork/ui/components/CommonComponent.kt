@@ -28,22 +28,22 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.quickwork.ui.screens.GreenMain
 
+import com.example.quickwork.R
 
 
 private val GreenMain = Color(0xFF4CAF50)
 private val GreenLight = Color(0xFFE8F5E9)
 private val GrayText = Color(0xFF616161)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReusableTopAppBar(
     title: String,
-    navController: NavController,
-    showBackButton: Boolean = true
+    navController: NavController
 ) {
     TopAppBar(
         title = {
@@ -55,20 +55,48 @@ fun ReusableTopAppBar(
             )
         },
         navigationIcon = {
-            if (showBackButton) {
-                IconButton(onClick = { navController.navigateUp() }) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
+            IconButton(onClick = {
+                navController.navigate("jobManage") {
+                    popUpTo(navController.graph.startDestinationId) { inclusive = false }
+                    launchSingleTop = true
+                    restoreState = true
                 }
+            }) {
+                Icon(
+                    painter = painterResource(id = R.drawable.logo_jobsgo),
+                    contentDescription = "JobsGo Logo",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        },
+        actions = {
+            IconButton(onClick = {
+                //Log.w("ReusableTopAppBar", "Search icon clicked, empty route specified")
+                 navController.navigate("hiring") // Skipped due to empty route
+            }) {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = "Search",
+                    tint = Color.White
+                )
+            }
+            IconButton(onClick = {
+                //Log.w("ReusableTopAppBar", "Notification icon clicked, empty route specified")
+                 navController.navigate("notification") // Skipped due to empty route
+            }) {
+                Icon(
+                    imageVector = Icons.Default.Notifications,
+                    contentDescription = "Notifications",
+                    tint = Color.White
+                )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = GreenMain,
             titleContentColor = Color.White,
-            navigationIconContentColor = Color.White
+            navigationIconContentColor = Color.White,
+            actionIconContentColor = Color.White
         ),
         modifier = Modifier.shadow(8.dp)
     )

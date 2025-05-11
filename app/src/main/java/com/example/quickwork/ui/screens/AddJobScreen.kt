@@ -159,7 +159,7 @@ fun AddJobScreen(navController: NavController) {
             ReusableTopAppBar(
                 title = "Add New Job",
                 navController = navController,
-                showBackButton = true
+                //showBackButton = true
             )
         },
         bottomBar = {

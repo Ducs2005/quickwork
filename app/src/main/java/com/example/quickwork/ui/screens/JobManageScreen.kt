@@ -175,7 +175,7 @@ fun JobManageScreen(navController: NavController) {
             ReusableTopAppBar(
                 title = "Manage Your Jobs",
                 navController = navController,
-                showBackButton = true
+                //showBackButton = true
             )
         },
         bottomBar = {
