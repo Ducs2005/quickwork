@@ -24,20 +24,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.quickwork.R
 import com.example.quickwork.data.models.Message
+import com.example.quickwork.ui.viewmodels.ChatUiState
+import com.example.quickwork.ui.viewmodels.ChatViewModel
+import com.example.quickwork.ui.viewmodels.ChatViewModelFactory
 import com.google.firebase.auth.FirebaseAuth
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -52,10 +52,14 @@ private val GrayText = Color(0xFF616161) // Gray for secondary text
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(navController: NavController, receiverId: String) {
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid ?: ""
-    val viewModel: ChatViewModel = viewModel(factory = ChatViewModelFactory(userId, receiverId))
+fun ChatScreen(
+    navController: NavController,
+    receiverId: String,
+    viewModel: ChatViewModel = viewModel(factory = ChatViewModelFactory(
+        userId = FirebaseAuth.getInstance().currentUser?.uid ?: "",
+        receiverId = receiverId
+    ))
+) {
     val uiState by viewModel.uiState.collectAsState()
     var newMessage by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -234,12 +238,12 @@ fun MessageItem(message: Message, isSent: Boolean, senderAvatarUrl: String?) {
                 if (!senderAvatarUrl.isNullOrBlank()) {
                     AsyncImage(
                         model = senderAvatarUrl,
-                        contentDescription = "receiver avatar",
+                        contentDescription = "Receiver avatar",
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(40.dp)
                             .clip(CircleShape),
                         contentScale = ContentScale.Crop,
-                        placeholder = painterResource(id = com.example.quickwork.R.drawable.ic_default_avatar),
+                        placeholder = painterResource(id = R.drawable.ic_default_avatar),
                         error = painterResource(id = R.drawable.ic_default_avatar)
                     )
                 } else {
@@ -311,53 +315,5 @@ fun MessageItem(message: Message, isSent: Boolean, senderAvatarUrl: String?) {
                 }
             }
         }
-//
-//        // Avatar for sent messages (right side)
-//        if (isSent) {
-//            Spacer(modifier = Modifier.width(8.dp))
-//            Surface(
-//                shape = CircleShape,
-//                color = GreenMain.copy(alpha = 0.1f),
-//                modifier = Modifier
-//                    .size(40.dp)
-//                    .clip(CircleShape)
-//            ) {
-//                if (!senderAvatarUrl.isNullOrBlank()) {
-//                    AsyncImage(
-//                        model = senderAvatarUrl,
-//                        contentDescription = "receiver avatar",
-//                        modifier = Modifier
-//                            .size(48.dp)
-//                            .clip(CircleShape),
-//                        contentScale = ContentScale.Crop,
-//                        placeholder = painterResource(id = com.example.quickwork.R.drawable.ic_default_avatar),
-//                        error = painterResource(id = R.drawable.ic_default_avatar)
-//                    )
-//                } else {
-//                    Icon(
-//                        imageVector = Icons.Default.Person,
-//                        contentDescription = "Default avatar",
-//                        tint = GreenMain,
-//                        modifier = Modifier
-//                            .size(24.dp)
-//                            .padding(8.dp)
-//                    )
-//                }
-//            }
-//        }
-    }
-}
-
-// ViewModel Factory to pass userId and receiverId
-class ChatViewModelFactory(
-    private val userId: String,
-    private val receiverId: String
-) : ViewModelProvider.Factory {
-    @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
-            return ChatViewModel(userId, receiverId) as T
-        }
-        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

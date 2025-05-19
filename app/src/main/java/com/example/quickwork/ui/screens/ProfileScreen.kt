@@ -1,12 +1,9 @@
 package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,22 +25,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import com.example.quickwork.data.models.*
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.UserProfileChangeRequest
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
+import com.example.quickwork.ui.viewmodels.ProfileViewModel
+import com.example.quickwork.ui.viewmodels.ProfileViewModelFactory
 import org.threeten.bp.LocalDate
 import org.threeten.bp.format.DateTimeFormatter
-import java.io.DataOutputStream
-import java.net.HttpURLConnection
-import java.net.URL
 
 private val GreenMain = Color(0xFF4CAF50) // Primary green color
 private val GreenLight = Color(0xFFE8F5E9) // Light green for backgrounds
@@ -52,114 +41,20 @@ private val GrayText = Color(0xFF616161) // Gray for secondary text
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProfileScreen(userId: String?, navController: NavController) {
-    val firestore = FirebaseFirestore.getInstance()
-    val auth = FirebaseAuth.getInstance()
-    var user by remember { mutableStateOf<User?>(null) }
-    var ratings by remember { mutableStateOf<List<Rating>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var isEditing by remember { mutableStateOf(false) }
-    var editedUser by remember { mutableStateOf<User?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    // Determine effective user ID (current user if userId is null/empty)
-    val effectiveUserId = userId.takeIf { !it.isNullOrEmpty() } ?: auth.currentUser?.uid
-    val isCurrentUser = effectiveUserId == auth.currentUser?.uid
+fun ProfileScreen(
+    userId: String?,
+    navController: NavController,
+    viewModel: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(userId))
+) {
+    val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-
-    // Calculate average rating
-    val averageRating by remember(ratings) {
-        derivedStateOf {
-            if (ratings.isEmpty()) 0.0
-            else ratings.map { it.stars }.average()
-        }
-    }
-
-    // Coroutine scope for async operations
-    val coroutineScope = rememberCoroutineScope()
 
     // Image picker for avatar
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        selectedImageUri = uri
-    }
-
-    // Fetch user data and ratings
-    LaunchedEffect(effectiveUserId) {
-        if (effectiveUserId == null) {
-            loading = false
-            errorMessage = "No user logged in"
-            return@LaunchedEffect
-        }
-        try {
-            // Fetch user data
-            val userDoc = firestore.collection("users").document(effectiveUserId).get().await()
-            user = userDoc.toObject(User::class.java)?.copy(uid = effectiveUserId)
-            if (isCurrentUser && user != null) {
-                editedUser = user // Initialize editable user
-            }
-
-            // Fetch ratings
-            val ratingDocs = firestore.collection("users")
-                .document(effectiveUserId)
-                .collection("rated")
-                .get()
-                .await()
-            ratings = ratingDocs.documents.mapNotNull { doc ->
-                try {
-                    Rating(
-                        stars = doc.getLong("stars")?.toInt() ?: 0,
-                        comment = doc.getString("comment") ?: "",
-                        jobName = doc.getString("jobName") ?: "",
-                        date = doc.getString("date") ?: "",
-                        ratedId = doc.getString("ratedId") ?: ""
-                    )
-                } catch (e: Exception) {
-                    Log.w("ProfileScreen", "Error parsing rating ${doc.id}", e)
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("ProfileScreen", "Failed to load user data or ratings", e)
-            errorMessage = "Failed to load profile: ${e.message}"
-        } finally {
-            loading = false
-        }
-    }
-
-    // Upload avatar to Cloudinary when selected
-    LaunchedEffect(selectedImageUri) {
-        if (selectedImageUri != null && effectiveUserId != null) {
-            try {
-                var downloadUrl = ""
-                CoroutineScope(Dispatchers.Main).launch {
-                    try {
-                        // Switch to IO thread for network operation
-                        loading = true
-                        withContext(Dispatchers.IO) {
-                            // Perform your network operation here
-                            // Example: uploading to Cloudinary
-                            downloadUrl =
-                                uploadImageToCloudinary(context, selectedImageUri!!).toString()
-                            if (downloadUrl != null) {
-                                editedUser = editedUser?.copy(avatarUrl = downloadUrl)
-                                // Update Firestore immediately
-                                firestore.collection("users").document(effectiveUserId)
-                                    .update("avatarUrl", downloadUrl).await()
-                                user = user?.copy(avatarUrl = downloadUrl)
-                                loading = false
-
-                            } else {
-                                errorMessage = "Failed to upload avatar"
-                            }
-                        }
-                    } catch (e: Exception) {
-                        e.printStackTrace()  // Handle exceptions here
-                    }
-                }
-            } catch (e: Exception) {
-                errorMessage = "Failed to upload avatar: ${e.message}"
-            }
+        if (uri != null) {
+            selectedImageUri = uri
+            viewModel.uploadAvatar(context, uri)
         }
     }
 
@@ -168,7 +63,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
             TopAppBar(
                 title = {
                     Text(
-                        user?.name ?: if (isCurrentUser) "My Profile" else "Profile",
+                        uiState.user?.name ?: if (viewModel.isCurrentUser) "My Profile" else "Profile",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White
@@ -184,8 +79,8 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                     }
                 },
                 actions = {
-                    if (isCurrentUser && !isEditing) {
-                        IconButton(onClick = { isEditing = true }) {
+                    if (viewModel.isCurrentUser && !uiState.isEditing) {
+                        IconButton(onClick = { viewModel.startEditing() }) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
                                 contentDescription = "Edit Profile",
@@ -211,20 +106,20 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalAlignment = Alignment.Start
         ) {
-            if (loading) {
+            if (uiState.isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator(color = GreenMain)
                 }
-            } else if (user == null) {
+            } else if (uiState.user == null) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = errorMessage ?: "User not found",
+                        text = uiState.errorMessage ?: "User not found",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.Red
@@ -261,17 +156,17 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             .size(64.dp)
                                             .clip(CircleShape)
                                             .then(
-                                                if (isCurrentUser && isEditing) {
+                                                if (viewModel.isCurrentUser && uiState.isEditing) {
                                                     Modifier.clickable { imagePicker.launch("image/*") }
                                                 } else {
                                                     Modifier
                                                 }
                                             )
                                     ) {
-                                        if (!user!!.avatarUrl.isNullOrBlank()) {
+                                        if (!uiState.user!!.avatarUrl.isNullOrBlank()) {
                                             AsyncImage(
-                                                model = user!!.avatarUrl,
-                                                contentDescription = "${user!!.name}'s avatar",
+                                                model = uiState.user!!.avatarUrl,
+                                                contentDescription = "${uiState.user!!.name}'s avatar",
                                                 modifier = Modifier
                                                     .size(64.dp)
                                                     .clip(CircleShape),
@@ -289,17 +184,21 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             )
                                         }
                                     }
-                                    if (isEditing) {
+                                    if (uiState.isEditing) {
                                         OutlinedTextField(
-                                            value = editedUser?.name ?: "",
-                                            onValueChange = { editedUser = editedUser?.copy(name = it) },
+                                            value = uiState.editedUser?.name ?: "",
+                                            onValueChange = {
+                                                viewModel.updateEditedUser(
+                                                    uiState.editedUser?.copy(name = it) ?: uiState.user
+                                                )
+                                            },
                                             label = { Text("Name") },
                                             shape = RoundedCornerShape(8.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         )
                                     } else {
                                         Text(
-                                            text = user!!.name,
+                                            text = uiState.user!!.name,
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = Color.Black
@@ -319,7 +218,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Text(
-                                        text = "Type: ${user!!.userType.name.replace("_", " ").lowercase().capitalize()}",
+                                        text = "Type: ${uiState.user!!.userType.name.replace("_", " ").lowercase().capitalize()}",
                                         fontSize = 14.sp,
                                         color = GrayText
                                     )
@@ -335,7 +234,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Text(
-                                        text = "Email: ${user!!.email}",
+                                        text = "Email: ${uiState.user!!.email}",
                                         fontSize = 14.sp,
                                         color = GrayText
                                     )
@@ -350,17 +249,21 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                         tint = GreenMain,
                                         modifier = Modifier.size(20.dp)
                                     )
-                                    if (isEditing) {
+                                    if (uiState.isEditing) {
                                         OutlinedTextField(
-                                            value = editedUser?.phone ?: "",
-                                            onValueChange = { editedUser = editedUser?.copy(phone = it) },
+                                            value = uiState.editedUser?.phone ?: "",
+                                            onValueChange = {
+                                                viewModel.updateEditedUser(
+                                                    uiState.editedUser?.copy(phone = it) ?: uiState.user
+                                                )
+                                            },
                                             label = { Text("Phone") },
                                             shape = RoundedCornerShape(8.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         )
                                     } else {
                                         Text(
-                                            text = "Phone: ${user!!.phone}",
+                                            text = "Phone: ${uiState.user!!.phone}",
                                             fontSize = 14.sp,
                                             color = GrayText
                                         )
@@ -368,7 +271,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                 }
 
                                 // Employee-specific fields
-                                if (user!!.userType == UserType.EMPLOYEE) {
+                                if (uiState.user!!.userType == UserType.EMPLOYEE) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
                                         text = "Employee Details",
@@ -386,14 +289,18 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             tint = GreenMain,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        if (isEditing) {
+                                        if (uiState.isEditing) {
                                             EducationLevelDropdown(
-                                                selectedLevel = editedUser?.education ?: EducationLevel.NONE,
-                                                onLevelChange = { editedUser = editedUser?.copy(education = it) }
+                                                selectedLevel = uiState.editedUser?.education ?: EducationLevel.NONE,
+                                                onLevelChange = {
+                                                    viewModel.updateEditedUser(
+                                                        uiState.editedUser?.copy(education = it) ?: uiState.user
+                                                    )
+                                                }
                                             )
                                         } else {
                                             Text(
-                                                text = "Education: ${user!!.education}",
+                                                text = "Education: ${uiState.user!!.education}",
                                                 fontSize = 14.sp,
                                                 color = GrayText
                                             )
@@ -409,14 +316,19 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             tint = GreenMain,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        if (isEditing) {
+                                        if (uiState.isEditing) {
                                             LanguageCertificateDropdown(
-                                                selectedCertificate = editedUser?.languageCertificate ?: LanguageCertificate.NONE,
-                                                onCertificateChange = { editedUser = editedUser?.copy(languageCertificate = it) }
+                                                selectedCertificate = uiState.editedUser?.languageCertificate
+                                                    ?: LanguageCertificate.NONE,
+                                                onCertificateChange = {
+                                                    viewModel.updateEditedUser(
+                                                        uiState.editedUser?.copy(languageCertificate = it) ?: uiState.user
+                                                    )
+                                                }
                                             )
                                         } else {
                                             Text(
-                                                text = "Language Certificate: ${user!!.languageCertificate}",
+                                                text = "Language Certificate: ${uiState.user!!.languageCertificate}",
                                                 fontSize = 14.sp,
                                                 color = GrayText
                                             )
@@ -433,7 +345,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             modifier = Modifier.size(20.dp)
                                         )
                                         Text(
-                                            text = "Jobs: ${user!!.jobList.joinToString(", ") { it.ifEmpty { "None" } }}",
+                                            text = "Jobs: ${uiState.user!!.jobList.joinToString(", ") { it.ifEmpty { "None" } }}",
                                             fontSize = 14.sp,
                                             color = GrayText
                                         )
@@ -441,7 +353,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                 }
 
                                 // Employer-specific fields
-                                if (user!!.userType == UserType.EMPLOYER) {
+                                if (uiState.user!!.userType == UserType.EMPLOYER) {
                                     Spacer(modifier = Modifier.height(12.dp))
                                     Text(
                                         text = "Employer Details",
@@ -459,17 +371,21 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             tint = GreenMain,
                                             modifier = Modifier.size(20.dp)
                                         )
-                                        if (isEditing) {
+                                        if (uiState.isEditing) {
                                             OutlinedTextField(
-                                                value = editedUser?.companyName ?: "",
-                                                onValueChange = { editedUser = editedUser?.copy(companyName = it) },
+                                                value = uiState.editedUser?.companyName ?: "",
+                                                onValueChange = {
+                                                    viewModel.updateEditedUser(
+                                                        uiState.editedUser?.copy(companyName = it) ?: uiState.user
+                                                    )
+                                                },
                                                 label = { Text("Company Name") },
                                                 shape = RoundedCornerShape(8.dp),
                                                 modifier = Modifier.fillMaxWidth()
                                             )
                                         } else {
                                             Text(
-                                                text = "Company: ${user!!.companyName}",
+                                                text = "Company: ${uiState.user!!.companyName}",
                                                 fontSize = 14.sp,
                                                 color = GrayText
                                             )
@@ -478,9 +394,9 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                 }
 
                                 // Edit/Save/Cancel Buttons
-                                if (isEditing) {
+                                if (uiState.isEditing) {
                                     Spacer(modifier = Modifier.height(16.dp))
-                                    errorMessage?.let {
+                                    uiState.errorMessage?.let {
                                         Text(
                                             text = it,
                                             color = Color.Red,
@@ -494,12 +410,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                         horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
                                         Button(
-                                            onClick = {
-                                                isEditing = false
-                                                editedUser = user // Reset to original
-                                                selectedImageUri = null
-                                                errorMessage = null
-                                            },
+                                            onClick = { viewModel.cancelEditing() },
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .height(48.dp)
@@ -513,44 +424,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             Text("Cancel", fontSize = 16.sp)
                                         }
                                         Button(
-                                            onClick = {
-                                                coroutineScope.launch {
-                                                    try {
-                                                        // Validate
-                                                        if (editedUser?.name?.isBlank() == true) {
-                                                            errorMessage = "Name is required"
-                                                            return@launch
-                                                        }
-                                                        if (editedUser?.phone?.isBlank() == true) {
-                                                            errorMessage = "Phone is required"
-                                                            return@launch
-                                                        }
-                                                        if (user!!.userType == UserType.EMPLOYER && editedUser?.companyName?.isBlank() == true) {
-                                                            errorMessage = "Company Name is required"
-                                                            return@launch
-                                                        }
-
-                                                        // Update Firebase Auth profile
-                                                        auth.currentUser?.updateProfile(
-                                                            UserProfileChangeRequest.Builder()
-                                                                .setDisplayName(editedUser?.name)
-                                                                .setPhotoUri(editedUser?.avatarUrl?.let { Uri.parse(it) })
-                                                                .build()
-                                                        )?.await()
-
-                                                        // Update Firestore
-                                                        firestore.collection("users").document(effectiveUserId!!)
-                                                            .set(editedUser!!).await()
-
-                                                        // Update UI
-                                                        user = editedUser
-                                                        isEditing = false
-                                                        errorMessage = null
-                                                    } catch (e: Exception) {
-                                                        errorMessage = "Failed to save changes: ${e.message}"
-                                                    }
-                                                }
-                                            },
+                                            onClick = { viewModel.saveProfile() },
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .height(48.dp)
@@ -564,11 +438,11 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             Text("Save", fontSize = 16.sp)
                                         }
                                     }
-                                } else if (!isCurrentUser) {
+                                } else if (!viewModel.isCurrentUser) {
                                     // Contact Button for other users
                                     Spacer(modifier = Modifier.height(16.dp))
                                     Button(
-                                        onClick = { navController.navigate("chat/$effectiveUserId") },
+                                        onClick = { navController.navigate("chat/${viewModel.effectiveUserId}") },
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .height(48.dp)
@@ -622,15 +496,15 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                         modifier = Modifier.size(24.dp)
                                     )
                                     Text(
-                                        text = if (ratings.isEmpty()) "No ratings yet"
-                                        else "Average: ${"%.1f".format(averageRating)} / 5",
+                                        text = if (uiState.ratings.isEmpty()) "No ratings yet"
+                                        else "Average: ${"%.1f".format(uiState.averageRating)} / 5",
                                         fontSize = 16.sp,
                                         fontWeight = FontWeight.Medium,
                                         color = Color.Black
                                     )
                                 }
                                 // Ratings List or No Ratings Message
-                                if (ratings.isEmpty()) {
+                                if (uiState.ratings.isEmpty()) {
                                     Text(
                                         text = "No ratings available",
                                         fontSize = 14.sp,
@@ -647,7 +521,7 @@ fun ProfileScreen(userId: String?, navController: NavController) {
                                             .heightIn(max = 300.dp),
                                         verticalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        items(ratings) { rating ->
+                                        items(uiState.ratings) { rating ->
                                             RatingItem(rating)
                                         }
                                     }

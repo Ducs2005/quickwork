@@ -1,7 +1,5 @@
 package com.example.quickwork.ui.screens
 
-import android.annotation.SuppressLint
-import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -26,92 +24,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.example.quickwork.data.models.*
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import org.threeten.bp.LocalDate
-import org.threeten.bp.format.DateTimeFormatter
-import java.util.UUID
+import com.example.quickwork.data.models.EducationLevel
+import com.example.quickwork.data.models.Job
+import com.example.quickwork.data.models.LanguageCertificate
+import com.example.quickwork.viewModel.EmployeeWithRating
+import com.example.quickwork.viewModel.HiringViewModel
+import com.example.quickwork.viewModel.JobWithEmployeeCount
 
-private val GreenMain = Color(0xFF4CAF50) // Primary green color
-private val GreenLight = Color(0xFFE8F5E9) // Light green for backgrounds
-private val GrayText = Color(0xFF616161) // Gray for secondary text
+private val GreenMain = Color(0xFF4CAF50)
+private val GreenLight = Color(0xFFE8F5E9)
+private val GrayText = Color(0xFF616161)
 
-data class EmployeeWithRating(
-    val user: User,
-    val averageRating: Double
-)
-
-@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HiringScreen(navController: NavController) {
-    val firestore = FirebaseFirestore.getInstance()
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val employerId = currentUser?.uid ?: ""
-    var employees by remember { mutableStateOf<List<EmployeeWithRating>>(emptyList()) }
-    var filteredEmployees by remember { mutableStateOf<List<EmployeeWithRating>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var selectedEmployee by remember { mutableStateOf<User?>(null) }
-    var selectedEducation by remember { mutableStateOf<EducationLevel?>(null) }
-    var selectedLanguage by remember { mutableStateOf<LanguageCertificate?>(null) }
+fun HiringScreen(navController: NavController, viewModel: HiringViewModel = viewModel()) {
+    val uiState by viewModel.uiState.collectAsState()
     var educationExpanded by remember { mutableStateOf(false) }
     var languageExpanded by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
-
-    // Fetch employees and their ratings
-    LaunchedEffect(Unit) {
-        try {
-            // Fetch all users with userType == EMPLOYEE
-            val userDocs = firestore.collection("users")
-                .whereEqualTo("userType", UserType.EMPLOYEE)
-                .get()
-                .await()
-            val employeeList = mutableListOf<EmployeeWithRating>()
-            for (doc in userDocs) {
-                try {
-                    val user = doc.toObject(User::class.java)
-                    // Fetch ratings for the user
-                    val ratingDocs = firestore.collection("users")
-                        .document(user.uid)
-                        .collection("rated")
-                        .get()
-                        .await()
-                    val ratings = ratingDocs.documents.mapNotNull { ratingDoc ->
-                        try {
-                            ratingDoc.toObject(Rating::class.java)
-                        } catch (e: Exception) {
-                            Log.w("HiringScreen", "Error parsing rating ${ratingDoc.id}", e)
-                            null
-                        }
-                    }
-                    val averageRating = if (ratings.isEmpty()) 0.0 else ratings.map { it.stars }.average()
-                    employeeList.add(EmployeeWithRating(user, averageRating))
-                } catch (e: Exception) {
-                    Log.w("HiringScreen", "Error parsing user ${doc.id}", e)
-                }
-            }
-            employees = employeeList.sortedBy { it.user.name }
-            filteredEmployees = employees // Initialize filtered list
-            isLoading = false
-        } catch (e: Exception) {
-            Log.e("HiringScreen", "Failed to load employees", e)
-            isLoading = false
-        }
-    }
-
-    // Apply filters
-    LaunchedEffect(selectedEducation, selectedLanguage) {
-        filteredEmployees = employees.filter { employee ->
-            val matchesEducation = selectedEducation?.let { employee.user.education == it } ?: true
-            val matchesLanguage = selectedLanguage?.let { employee.user.languageCertificate == it } ?: true
-            matchesEducation && matchesLanguage
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -141,6 +73,9 @@ fun HiringScreen(navController: NavController) {
                 modifier = Modifier.shadow(8.dp)
             )
         },
+        bottomBar = {
+            ReusableBottomNavBar(navController = navController)
+        },
         containerColor = GreenLight
     ) { innerPadding ->
         Column(
@@ -163,7 +98,7 @@ fun HiringScreen(navController: NavController) {
                     modifier = Modifier.weight(1f)
                 ) {
                     TextField(
-                        value = selectedEducation?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "All Education",
+                        value = uiState.selectedEducation?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "All Education",
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = {
@@ -185,7 +120,7 @@ fun HiringScreen(navController: NavController) {
                         DropdownMenuItem(
                             text = { Text("All Education") },
                             onClick = {
-                                selectedEducation = null
+                                viewModel.updateEducationFilter(null)
                                 educationExpanded = false
                             }
                         )
@@ -193,7 +128,7 @@ fun HiringScreen(navController: NavController) {
                             DropdownMenuItem(
                                 text = { Text(level.name.replace("_", " ").lowercase().capitalize()) },
                                 onClick = {
-                                    selectedEducation = level
+                                    viewModel.updateEducationFilter(level)
                                     educationExpanded = false
                                 }
                             )
@@ -208,7 +143,7 @@ fun HiringScreen(navController: NavController) {
                     modifier = Modifier.weight(1f)
                 ) {
                     TextField(
-                        value = selectedLanguage?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "All Certificates",
+                        value = uiState.selectedLanguage?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "All Certificates",
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = {
@@ -230,7 +165,7 @@ fun HiringScreen(navController: NavController) {
                         DropdownMenuItem(
                             text = { Text("All Certificates") },
                             onClick = {
-                                selectedLanguage = null
+                                viewModel.updateLanguageFilter(null)
                                 languageExpanded = false
                             }
                         )
@@ -238,100 +173,75 @@ fun HiringScreen(navController: NavController) {
                             DropdownMenuItem(
                                 text = { Text(cert.name.replace("_", " ").lowercase().capitalize()) },
                                 onClick = {
-                                    selectedLanguage = cert
-                                    languageExpanded = false
-                                }
-                            )
+                                    viewModel.updateLanguageFilter(cert)
+                                    educationExpanded = false
+                                })
                         }
-                    }
-                }
-            }
-
-            // Employee List
-            if (isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(color = GreenMain)
-                }
-            } else if (filteredEmployees.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "No employees match the filters",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = GrayText
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    items(filteredEmployees) { employee ->
-                        EmployeeCard(
-                            employee = employee,
-                            onInviteClick = { selectedEmployee = employee.user }
-                        )
                     }
                 }
             }
         }
 
-        // Job Selection Dialog
-        selectedEmployee?.let { employee ->
-            JobSelectionDialog(
-                employerId = employerId,
-                employee = employee,
-                onDismiss = { selectedEmployee = null },
-                onInvite = { job ->
-                    coroutineScope.launch {
-                        try {
-                            // Add employee to job's employees subcollection
-                            val employeeData = mapOf(
-                                "id" to employee.uid,
-                                "jobState" to JobState.INVITING.name,
-                                "receiveSalary" to false
-                            )
-                            firestore.collection("jobs")
-                                .document(job.id)
-                                .collection("employees")
-                                .document(employee.uid)
-                                .set(employeeData)
-                                .await()
-
-                            // Create notification for the employee
-                            val notificationId = UUID.randomUUID().toString()
-                            val notification = Notification(
-                                id = notificationId,
-                                title = "Job Invitation",
-                                content = "You have been invited to join '${job.name}' by ${currentUser?.displayName ?: "Employer"}.",
-                                from = employerId,
-                                isReaded = false,
-                                timestamp = System.currentTimeMillis()
-                            )
-                            firestore.collection("users")
-                                .document(employee.uid)
-                                .collection("notifications")
-                                .document(notificationId)
-                                .set(notification)
-                                .await()
-
-                            Log.d("HiringScreen", "Successfully invited ${employee.name} to job ${job.id}")
-                        } catch (e: Exception) {
-                            Log.e("HiringScreen", "Failed to invite employee", e)
-                        }
-                        selectedEmployee = null
-                    }
+        // Employee List
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = GreenMain)
+            }
+        } else if (uiState.filteredEmployees.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No employees match the filters",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = GrayText
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                items(uiState.filteredEmployees) { employee ->
+                    EmployeeCard(
+                        employee = employee,
+                        onInviteClick = { viewModel.selectEmployee(employee.user) }
+                    )
                 }
+            }
+        }
+
+        // Error Message
+        uiState.errorMessage?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+        }
+
+        // Job Selection Dialog
+        uiState.selectedEmployee?.let { employee ->
+            JobSelectionDialog(
+                employee = employee,
+                jobs = uiState.jobs,
+                isLoading = uiState.isJobLoading,
+                onDismiss = { viewModel.selectEmployee(null) },
+                onInvite = { job -> viewModel.inviteEmployee(job) }
             )
         }
     }
 }
+
 
 @Composable
 fun EmployeeCard(
@@ -368,9 +278,7 @@ fun EmployeeCard(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape),
-                        contentScale = ContentScale.Crop,
-                        placeholder = null,
-
+                        contentScale = ContentScale.Crop
                     )
                 } else {
                     Icon(
@@ -396,12 +304,12 @@ fun EmployeeCard(
                     color = Color.Black
                 )
                 Text(
-                    text = "Education: ${employee.user.education.name.replace("_", " ").lowercase().capitalize()}",
+                    text = "Education: ${employee.user.education?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "None"}",
                     fontSize = 14.sp,
                     color = GrayText
                 )
                 Text(
-                    text = "Language: ${employee.user.languageCertificate.name.replace("_", " ").lowercase().capitalize()}",
+                    text = "Language: ${employee.user.languageCertificate?.name?.replace("_", " ")?.lowercase()?.capitalize() ?: "None"}",
                     fontSize = 14.sp,
                     color = GrayText
                 )
@@ -442,64 +350,14 @@ fun EmployeeCard(
     }
 }
 
-data class JobWithEmployeeCount(
-    val job: Job,
-    val employeeCount: Int
-)
-
 @Composable
 fun JobSelectionDialog(
-    employerId: String,
-    employee: User,
+    employee: com.example.quickwork.data.models.User,
+    jobs: List<JobWithEmployeeCount>,
+    isLoading: Boolean,
     onDismiss: () -> Unit,
     onInvite: (Job) -> Unit
 ) {
-    val firestore = FirebaseFirestore.getInstance()
-    var jobs by remember { mutableStateOf<List<JobWithEmployeeCount>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val currentDate = LocalDate.now()
-
-    // Fetch employer's jobs and filter by dateEnd
-    LaunchedEffect(employerId) {
-        try {
-            val jobDocs = firestore.collection("jobs")
-                .whereEqualTo("employerId", employerId)
-                .get()
-                .await()
-            val jobList = mutableListOf<JobWithEmployeeCount>()
-            for (doc in jobDocs) {
-                try {
-                    val job = doc.toObject(Job::class.java)
-                    // Filter jobs where dateEnd is today or in the future
-                    val dateEnd = try {
-                        LocalDate.parse(job?.dateEnd, dateFormatter)
-                    } catch (e: Exception) {
-                        Log.w("JobSelectionDialog", "Invalid dateEnd format for job ${doc.id}", e)
-                        null
-                    }
-                    if (dateEnd != null && !dateEnd.isBefore(currentDate)) {
-                        // Fetch employee count from employees subcollection
-                        val employeeDocs = firestore.collection("jobs")
-                            .document(doc.id)
-                            .collection("employees")
-                            .get()
-                            .await()
-                        val employeeCount = employeeDocs.size()
-                        jobList.add(JobWithEmployeeCount(job, employeeCount))
-                    }
-                } catch (e: Exception) {
-                    Log.w("JobSelectionDialog", "Error parsing job ${doc.id}", e)
-                }
-            }
-            jobs = jobList
-            isLoading = false
-        } catch (e: Exception) {
-            Log.e("JobSelectionDialog", "Failed to load jobs", e)
-            isLoading = false
-        }
-    }
-
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier

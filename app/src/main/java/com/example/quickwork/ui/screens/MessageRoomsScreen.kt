@@ -2,7 +2,6 @@ package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,29 +20,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.AsyncImage
-import com.example.quickwork.data.models.Message
+import com.example.quickwork.R
 import com.example.quickwork.data.models.MessageRoom
 import com.example.quickwork.ui.components.BottomNavigation
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import com.example.quickwork.ui.viewmodels.MessageRoomsViewModel
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import com.example.quickwork.R
-
-
 
 private val GreenMain = Color(0xFF4CAF50) // Primary green color
 private val GreenLight = Color(0xFFE8F5E9) // Light green for backgrounds
@@ -53,95 +45,13 @@ private val GrayText = Color(0xFF616161) // Gray for secondary text
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MessageRoomsScreen(navController: NavController) {
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid ?: ""
-    val firestore = FirebaseFirestore.getInstance()
-    var messageRooms by remember { mutableStateOf<List<MessageRoom>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    val coroutineScope = rememberCoroutineScope()
-    var listenerRegistration by remember { mutableStateOf<ListenerRegistration?>(null) }
-    var userRole by remember { mutableStateOf("employee") } // Default to employee
-
-
-    LaunchedEffect(userId) {
-        if (userId.isEmpty()) {
-            isLoading = false
-            return@LaunchedEffect
-        }
-        if (currentUser != null) {
-            try {
-                val userDoc = firestore.collection("users")
-                    .document(currentUser.uid)
-                    .get()
-                    .await()
-                userRole = userDoc.getString("userType") ?: "employee"
-            } catch (e: Exception) {
-                Log.e("AddJobScreen", "Failed to fetch user role", e)
-                userRole = "employee" // Default to employee on error
-            }
-        }
-
-        try {
-            listenerRegistration = firestore.collection("users")
-                .document(userId)
-                .collection("messageRooms")
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        Log.e("MessageRoomsScreen", "Error listening to message rooms", error)
-                        isLoading = false
-                        return@addSnapshotListener
-                    }
-
-                    coroutineScope.launch {
-                        val rooms = mutableListOf<MessageRoom>()
-                        snapshot?.documents?.forEach { doc ->
-                            val receiverId = doc.id
-                            try {
-                                val userDoc = firestore.collection("users")
-                                    .document(receiverId)
-                                    .get()
-                                    .await()
-                                val receiverName = userDoc.getString("name") ?: "Unknown"
-                                val receiverAvatarUrl = userDoc.getString("avatarUrl") // Fetch avatar URL
-
-                                val messages = firestore.collection("users")
-                                    .document(userId)
-                                    .collection("messageRooms")
-                                    .document(receiverId)
-                                    .collection("messages")
-                                    .orderBy("date", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                                    .limit(1)
-                                    .get()
-                                    .await()
-                                val latestMessage = messages.documents.firstOrNull()?.let { msgDoc ->
-                                    Message(
-                                        id = msgDoc.id,
-                                        content = msgDoc.getString("content") ?: "",
-                                        date = msgDoc.getString("date") ?: "",
-                                        isReaded = msgDoc.getBoolean("isReaded") ?: false
-                                    )
-                                }
-                                rooms.add(MessageRoom(receiverId, receiverName, receiverAvatarUrl, latestMessage))
-                            } catch (e: Exception) {
-                                Log.w("MessageRoomsScreen", "Error processing room $receiverId", e)
-                            }
-                        }
-                        messageRooms = rooms.sortedByDescending { it.latestMessage?.date }
-                        isLoading = false
-                    }
-                }
-        } catch (e: Exception) {
-            Log.e("MessageRoomsScreen", "Failed to set up listener", e)
-            isLoading = false
-        }
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            listenerRegistration?.remove()
-        }
-    }
+fun MessageRoomsScreen(
+    navController: NavController,
+    viewModel: MessageRoomsViewModel = viewModel()
+) {
+    val messageRooms by viewModel.messageRooms.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val userRole by viewModel.userRole.collectAsState()
 
     Scaffold(
         topBar = {
@@ -172,16 +82,15 @@ fun MessageRoomsScreen(navController: NavController) {
             )
         },
         bottomBar = {
-            if (userRole == "EMPLOYEE") {
+            if (userRole.equals("employee", ignoreCase = true)) {
                 BottomNavigation(
                     navController,
                     currentScreen = "chatRoom"
                 )
             } else {
-                Log.e("messager om", userRole)
                 ReusableBottomNavBar(navController = navController)
             }
-        } ,
+        },
         containerColor = GreenLight
     ) { padding ->
         if (isLoading) {
@@ -282,7 +191,6 @@ fun MessageRoomItem(room: MessageRoom, onClick: () -> Unit) {
                         placeholder = painterResource(id = R.drawable.ic_default_avatar),
                         error = painterResource(id = R.drawable.ic_default_avatar)
                     )
-
                 } else {
                     Icon(
                         imageVector = Icons.Default.Person,

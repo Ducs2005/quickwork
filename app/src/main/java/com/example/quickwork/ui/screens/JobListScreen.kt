@@ -2,7 +2,6 @@ package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
@@ -30,19 +29,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.quickwork.R
-import com.example.quickwork.data.models.Address
-import com.example.quickwork.data.models.Employee
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
 import com.example.quickwork.ui.components.BottomNavigation
 import com.example.quickwork.ui.components.Header
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import java.time.LocalDate
-import java.time.format.DateTimeFormatter
+import com.example.quickwork.ui.viewmodels.JobViewModel
 
 private val GreenMain = Color(0xFF4CAF50)
 
@@ -50,71 +45,10 @@ private val GreenMain = Color(0xFF4CAF50)
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JobListScreen(navController: NavController) {
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid
-    val firestore = FirebaseFirestore.getInstance()
-
-    var jobs by remember { mutableStateOf<List<Job>>(emptyList()) }
-    var latestJob by remember { mutableStateOf<Job?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-
-    LaunchedEffect(userId) {
-        if (userId != null) {
-            firestore.collection("jobs")
-                .get()
-                .addOnSuccessListener { querySnapshot ->
-                    jobs = querySnapshot.documents.mapNotNull { doc ->
-                        try {
-                            Job(
-                                id = doc.id,
-                                name = doc.getString("name") ?: "",
-                                type = JobType.valueOf(doc.getString("type") ?: "PARTTIME"),
-                                employerId = doc.getString("employerId") ?: "",
-                                detail = doc.getString("detail") ?: "",
-                                imageUrl = doc.getString("imageUrl") ?: "",
-                                salary = doc.getLong("salary")?.toInt() ?: 0,
-                                insurance = doc.getLong("insurance")?.toInt() ?: 0,
-                                dateUpload = doc.getString("dateUpload") ?: "",
-                                workingHoursStart = doc.getString("workingHoursStart") ?: "",
-                                workingHoursEnd = doc.getString("workingHoursEnd") ?: "",
-                                dateStart = doc.getString("dateStart") ?: "",
-                                dateEnd = doc.getString("dateEnd") ?: "",
-                                employees = (doc.get("employees") as? List<Map<String, Any>>)?.map { employeeMap ->
-                                    Employee(
-                                        id = employeeMap["id"] as? String ?: ""
-                                    )
-                                } ?: emptyList(),
-                                employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
-                                companyName = doc.getString("companyName") ?: "Unknown",
-                                categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
-                                address = Address()
-
-                            )
-                        } catch (e: Exception) {
-                            Log.w("JobListScreen", "Error parsing job ${doc.id}", e)
-                            null
-                        }
-                    }
-
-                    latestJob = jobs.maxByOrNull { job ->
-                        try {
-                            LocalDate.parse(job.dateUpload, DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-                        } catch (e: Exception) {
-                            LocalDate.MIN
-                        }
-                    }
-
-                    isLoading = false
-                }
-                .addOnFailureListener { e ->
-                    Log.e("JobListScreen", "Failed to load jobs", e)
-                    isLoading = false
-                }
-        } else {
-            isLoading = false
-        }
-    }
+fun JobListScreen(navController: NavController, viewModel: JobViewModel = viewModel()) {
+    val jobs by viewModel.jobs.collectAsState()
+    val latestJob by viewModel.latestJob.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
     Scaffold(
         topBar = { Header(navController) },
@@ -154,9 +88,7 @@ fun HomeContent(
     ) {
         SectionHeader(
             title = "Việc mới tải lên",
- //           onSeeMoreClick = { navController.navigate("jobSearchResult/recommended/null") }
             onSeeMoreClick = { navController.navigate("jobSearchResult//null") }
-
         )
         if (isLoading) {
             Box(

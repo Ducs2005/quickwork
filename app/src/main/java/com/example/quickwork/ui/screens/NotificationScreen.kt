@@ -1,6 +1,5 @@
 package com.example.quickwork.ui.screens
 
-import android.util.Log
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,62 +24,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.quickwork.data.models.Notification
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import com.example.quickwork.ui.viewmodels.NotificationViewModel
 
 private val GreenMain = Color(0xFF4CAF50)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NotificationScreen(navController: NavController) {
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid
-    val firestore = FirebaseFirestore.getInstance()
-    var notifications by remember { mutableStateOf<List<Notification>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    val coroutineScope = rememberCoroutineScope()
-
-    // Fetch notifications from Firestore
-    LaunchedEffect(userId) {
-        if (userId != null) {
-            try {
-                val querySnapshot = firestore.collection("users")
-                    .document(userId)
-                    .collection("notifications")
-                    .orderBy("timestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
-                    .get()
-                    .await()
-                notifications = querySnapshot.documents.mapNotNull { doc ->
-                    try {
-                        Notification(
-                            id = doc.id,
-                            title = doc.getString("title") ?: "",
-                            content = doc.getString("content") ?: "",
-                            from = doc.getString("from") ?: "",
-                            isReaded = doc.getBoolean("isReaded") ?: false,
-                            timestamp = doc.getLong("timestamp") ?: 0L
-                        )
-                    } catch (e: Exception) {
-                        Log.w("NotificationScreen", "Error parsing notification ${doc.id}", e)
-                        null
-                    }
-                }
-                isLoading = false
-            } catch (e: Exception) {
-                Log.e("NotificationScreen", "Failed to load notifications", e)
-                isLoading = false
-            }
-        } else {
-            isLoading = false
-        }
-    }
-
-    // Count unread notifications
-    val unreadCount = notifications.count { !it.isReaded }
+fun NotificationScreen(
+    navController: NavController,
+    viewModel: NotificationViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
@@ -103,26 +60,8 @@ fun NotificationScreen(navController: NavController) {
                     }
                 },
                 actions = {
-                    if (unreadCount > 0) {
-                        TextButton(onClick = {
-                            coroutineScope.launch {
-                                try {
-                                    val batch = firestore.batch()
-                                    notifications.filter { !it.isReaded }.forEach { notification ->
-                                        val docRef = firestore.collection("users")
-                                            .document(userId!!)
-                                            .collection("notifications")
-                                            .document(notification.id)
-                                        batch.update(docRef, "isReaded", true)
-                                    }
-                                    batch.commit().await()
-                                    notifications = notifications.map { it.copy(isReaded = true) }
-                                    Log.d("NotificationScreen", "All notifications marked as read")
-                                } catch (e: Exception) {
-                                    Log.e("NotificationScreen", "Failed to mark all notifications as read", e)
-                                }
-                            }
-                        }) {
+                    if (uiState.unreadCount > 0) {
+                        TextButton(onClick = { viewModel.markAllNotificationsAsRead() }) {
                             Text(
                                 text = "Mark All Read",
                                 color = Color.White,
@@ -151,7 +90,7 @@ fun NotificationScreen(navController: NavController) {
         )
     ) { padding ->
         when {
-            isLoading -> {
+            uiState.isLoading -> {
                 Box(
                     modifier = Modifier
                         .padding(padding)
@@ -164,7 +103,7 @@ fun NotificationScreen(navController: NavController) {
                     )
                 }
             }
-            notifications.isEmpty() -> {
+            uiState.notifications.isEmpty() -> {
                 Column(
                     modifier = Modifier
                         .padding(padding)
@@ -205,30 +144,10 @@ fun NotificationScreen(navController: NavController) {
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(bottom = 16.dp)
                 ) {
-                    items(notifications) { notification ->
+                    items(uiState.notifications) { notification ->
                         NotificationItem(
                             notification = notification,
-                            onClick = {
-                                if (!notification.isReaded && userId != null) {
-                                    coroutineScope.launch {
-                                        try {
-                                            firestore.collection("users")
-                                                .document(userId)
-                                                .collection("notifications")
-                                                .document(notification.id)
-                                                .update("isReaded", true)
-                                                .await()
-                                            notifications = notifications.map {
-                                                if (it.id == notification.id) it.copy(isReaded = true)
-                                                else it
-                                            }
-                                            Log.d("NotificationScreen", "Notification ${notification.id} marked as read")
-                                        } catch (e: Exception) {
-                                            Log.e("NotificationScreen", "Failed to mark notification ${notification.id} as read", e)
-                                        }
-                                    }
-                                }
-                            }
+                            onClick = { viewModel.markNotificationAsRead(notification.id) }
                         )
                         Divider(
                             color = Color.Gray.copy(alpha = 0.2f),

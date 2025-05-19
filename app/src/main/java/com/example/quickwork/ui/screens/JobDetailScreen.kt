@@ -1,7 +1,6 @@
 package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
-import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -25,13 +24,14 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
-import com.example.quickwork.data.models.*
+import com.example.quickwork.data.models.Job
+import com.example.quickwork.ui.viewmodels.JobDetailViewModel
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.tasks.await
 import org.threeten.bp.LocalDate
 import org.threeten.bp.format.DateTimeFormatter
 
@@ -42,164 +42,18 @@ private val GrayText = Color(0xFF616161) // Gray for secondary text
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JobDetailScreen(navController: NavHostController, jobId: String) {
-    val firestore = FirebaseFirestore.getInstance()
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid
-    var job by remember { mutableStateOf<Job?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var hasApplied by remember { mutableStateOf(false) }
-    var employerName by remember { mutableStateOf("") }
-    var categoryNames by remember { mutableStateOf<List<String>>(emptyList()) }
+fun JobDetailScreen(
+    navController: NavHostController,
+    jobId: String,
+    viewModel: JobDetailViewModel = viewModel(factory = JobDetailViewModelFactory(jobId))
+) {
+    val job by viewModel.job.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val hasApplied by viewModel.hasApplied.collectAsState()
+    val employerName by viewModel.employerName.collectAsState()
+    val categoryNames by viewModel.categoryNames.collectAsState()
     var isDescriptionExpanded by remember { mutableStateOf(false) }
-
-    LaunchedEffect(jobId) {
-        try {
-            // Fetch job details
-            val document = firestore.collection("jobs")
-                .document(jobId)
-                .get()
-                .await()
-            if (document.exists()) {
-                val baseJob = Job(
-                    id = document.id,
-                    name = document.getString("name") ?: "",
-                    type = JobType.valueOf(document.getString("type") ?: "PARTTIME"),
-                    employerId = document.getString("employerId") ?: "",
-                    detail = document.getString("detail") ?: "",
-                    imageUrl = document.getString("imageUrl") ?: "",
-                    salary = document.getLong("salary")?.toInt() ?: 0,
-                    insurance = document.getLong("insurance")?.toInt() ?: 0,
-                    dateUpload = document.getString("dateUpload") ?: "",
-                    workingHoursStart = document.getString("workingHoursStart") ?: "",
-                    workingHoursEnd = document.getString("workingHoursEnd") ?: "",
-                    dateStart = document.getString("dateStart") ?: "",
-                    dateEnd = document.getString("dateEnd") ?: "",
-                    employees = emptyList(),
-                    employeeRequired = document.getLong("employeeRequired")?.toInt() ?: 0,
-                    companyName = document.getString("companyName") ?: "Unknown",
-                    categoryIds = document.get("categoryIds") as? List<String> ?: emptyList(),
-                    address = Address()
-                )
-
-                // Fetch employer name from user document
-                val userDoc = firestore.collection("users")
-                    .document(baseJob.employerId)
-                    .get()
-                    .await()
-                employerName = userDoc.getString("name") ?: "Unknown Employer"
-
-                // Fetch category names
-                val categoryIds = baseJob.categoryIds
-                val fetchedCategoryNames = mutableListOf<String>()
-                for (categoryId in categoryIds) {
-                    try {
-                        val categoryDoc = firestore.collection("category")
-                            .document(categoryId)
-                            .get()
-                            .await()
-                        val categoryName = categoryDoc.getString("name") ?: "Unknown Category"
-                        fetchedCategoryNames.add(categoryName)
-                    } catch (e: Exception) {
-                        Log.w("JobDetailScreen", "Error fetching category $categoryId", e)
-                        fetchedCategoryNames.add("Unknown Category")
-                    }
-                }
-                categoryNames = fetchedCategoryNames
-
-                // Fetch employees from subcollection
-                val employeeDocs = firestore.collection("jobs")
-                    .document(jobId)
-                    .collection("employees")
-                    .get()
-                    .await()
-                val employeeList = employeeDocs.map { empDoc ->
-                    val attendanceList = (empDoc["attendance"] as? List<Map<String, Any>>)?.map { att ->
-                        DailyAttendance(
-                            date = att["date"] as? String ?: "",
-                            status = AttendanceStatus.valueOf(att["status"] as? String ?: "ABSENT")
-                        )
-                    } ?: emptyList()
-
-                    Employee(
-                        id = empDoc.getString("id") ?: "",
-                        jobState = JobState.valueOf(empDoc.getString("jobState") ?: "APPLYING"),
-                        attendance = attendanceList
-                    )
-                }
-
-                job = baseJob.copy(employees = employeeList)
-                hasApplied = employeeList.any { it.id == userId }
-                isLoading = false
-            } else {
-                isLoading = false
-            }
-        } catch (e: Exception) {
-            Log.e("JobDetailScreen", "Failed to load job", e)
-            isLoading = false
-        }
-    }
-
-    fun applyForJob() {
-        if (userId != null && job != null) {
-            val jobId = job!!.id
-            val userRef = firestore.collection("users").document(userId)
-            val jobRef = firestore.collection("jobs").document(jobId)
-            val jobEmployeesRef = jobRef.collection("employees").document(userId)
-            val attendanceRef = jobEmployeesRef.collection("attendance")
-
-            // 1. Update the user document with jobId
-            userRef.update("jobList", FieldValue.arrayUnion(jobId))
-
-            // 2. Save basic employee data
-            val employeeData = mapOf(
-                "id" to userId,
-                "jobState" to JobState.APPLYING.name
-            )
-
-            jobEmployeesRef.set(employeeData)
-                .addOnSuccessListener {
-                    // 3. Generate attendance data and use batch write
-                    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-                    val startDate = LocalDate.parse(job!!.dateStart, formatter)
-                    val endDate = LocalDate.parse(job!!.dateEnd, formatter)
-
-                    val batch = firestore.batch()
-                    var date = startDate
-                    while (!date.isAfter(endDate)) {
-                        val dateStr = date.format(formatter)
-                        val attendanceData = mapOf(
-                            "date" to dateStr,
-                            "status" to AttendanceStatus.ABSENT.name
-                        )
-                        val attendanceDoc = attendanceRef.document(dateStr)
-                        batch.set(attendanceDoc, attendanceData)
-                        date = date.plusDays(1)
-                    }
-
-                    // 4. Commit all attendance records
-                    batch.commit()
-                        .addOnSuccessListener {
-                            Log.d("JobDetailScreen", "Successfully saved attendance records.")
-                            // 5. Update local UI
-                            job = job!!.copy(
-                                employees = job!!.employees + Employee(
-                                    id = userId,
-                                    jobState = JobState.APPLYING,
-                                    attendance = emptyList()
-                                )
-                            )
-                            hasApplied = true
-                        }
-                        .addOnFailureListener { e ->
-                            Log.e("JobDetailScreen", "Failed to save attendance records", e)
-                        }
-                }
-                .addOnFailureListener { e ->
-                    Log.e("JobDetailScreen", "Failed to apply for job", e)
-                }
-        }
-    }
+    val userId = FirebaseAuth.getInstance().currentUser?.uid
 
     Scaffold(
         topBar = {
@@ -347,6 +201,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                         )
                     }
                     Spacer(modifier = Modifier.height(12.dp))
+
                     // Employer
                     Text(
                         text = "Employer",
@@ -377,7 +232,7 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     // Apply Button
                     if (!hasApplied && !isFull && !isEmployer) {
                         Button(
-                            onClick = { applyForJob() },
+                            onClick = { viewModel.applyForJob() },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
@@ -450,25 +305,6 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                                     color = Color.Black
                                 )
                             }
-
-                            // Insurance
-//                            Row(
-//                                verticalAlignment = Alignment.CenterVertically,
-//                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-//                            ) {
-//                                Icon(
-//                                    imageVector = Icons.Default.MonetizationOn,
-//                                    contentDescription = "Insurance",
-//                                    tint = GreenMain,
-//                                    modifier = Modifier.size(20.dp)
-//                                )
-//                                Text(
-//                                    text = "Insurance: $${job!!.insurance}",
-//                                    fontSize = 16.sp,
-//                                    fontWeight = FontWeight.Medium,
-//                                    color = Color.Black
-//                                )
-//                            }
 
                             // Working Hours
                             Row(
@@ -545,8 +381,6 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                     }
                     Spacer(modifier = Modifier.height(16.dp))
 
-
-
                     // Description
                     Text(
                         text = "Description",
@@ -576,5 +410,17 @@ fun JobDetailScreen(navController: NavHostController, jobId: String) {
                 }
             }
         }
+    }
+}
+
+
+
+class JobDetailViewModelFactory(private val jobId: String) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(JobDetailViewModel::class.java)) {
+            return JobDetailViewModel(jobId) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

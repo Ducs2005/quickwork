@@ -3,7 +3,6 @@ package com.example.quickwork.ui.screens
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -25,158 +24,34 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.quickwork.data.models.*
+import com.example.quickwork.ui.viewmodels.JobCategory
+import com.example.quickwork.ui.viewmodels.JobManageViewModel
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
-import kotlinx.coroutines.tasks.await
-import org.threeten.bp.LocalDate
-import org.threeten.bp.format.DateTimeFormatter
-import java.util.UUID
 
 private val GreenMain = Color(0xFF4CAF50)
 private val GreenLight = Color(0xFFE8F5E9)
 private val GrayText = Color(0xFF616161)
 
-enum class JobCategory { MANAGING, INCOMING, ENDED }
-
 @RequiresApi(Build.VERSION_CODES.O)
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JobManageScreen(navController: NavController) {
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid
-    val firestore = FirebaseFirestore.getInstance()
-    var jobs by remember { mutableStateOf<List<Job>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var selectedJob by remember { mutableStateOf<Job?>(null) }
-    var selectedAttendanceJob by remember { mutableStateOf<Job?>(null) }
-    var selectedCategory by remember { mutableStateOf(JobCategory.MANAGING) }
-
-    // Categorize jobs
-    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now() // May 10, 2025
-    val managingJobs by remember(jobs) {
-        derivedStateOf {
-            jobs.filter {
-                try {
-                    val startDate = LocalDate.parse(it.dateStart, formatter)
-                    val endDate = LocalDate.parse(it.dateEnd, formatter)
-                    !today.isBefore(startDate) && !today.isAfter(endDate)
-                } catch (e: Exception) {
-                    false // Exclude invalid dates
-                }
-            }
-        }
-    }
-    val incomingJobs by remember(jobs) {
-        derivedStateOf {
-            jobs.filter {
-                try {
-                    val startDate = LocalDate.parse(it.dateStart, formatter)
-                    today.isBefore(startDate)
-                } catch (e: Exception) {
-                    false // Exclude invalid dates
-                }
-            }
-        }
-    }
-    val endedJobs by remember(jobs) {
-        derivedStateOf {
-            jobs.filter {
-                try {
-                    val endDate = LocalDate.parse(it.dateEnd, formatter)
-                    today.isAfter(endDate)
-                } catch (e: Exception) {
-                    false // Exclude invalid dates
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(userId) {
-        if (userId != null) {
-            try {
-                firestore.collection("jobs")
-                    .whereEqualTo("employerId", userId)
-                    .get()
-                    .await()
-                    .let { querySnapshot ->
-                        jobs = querySnapshot.documents.mapNotNull { doc ->
-                            val employeeDocs = firestore.collection("jobs")
-                                .document(doc.id)
-                                .collection("employees")
-                                .get()
-                                .await()
-                            val employeeList = employeeDocs.documents.mapNotNull { empDoc ->
-                                val empId = empDoc.getString("id") ?: empDoc.id
-                                if (empId.isBlank()) {
-                                    Log.w("JobManageScreen", "Invalid employee document: ${empDoc.data}")
-                                    null
-                                } else {
-                                    val attendanceDocs = firestore.collection("jobs")
-                                        .document(doc.id)
-                                        .collection("employees")
-                                        .document(empId)
-                                        .collection("attendance")
-                                        .get()
-                                        .await()
-                                    val attendanceList = attendanceDocs.documents.mapNotNull { attDoc ->
-                                        val date = attDoc.getString("date") ?: ""
-                                        val status = attDoc.getString("status")?.let { AttendanceStatus.valueOf(it) }
-                                        if (date.isNotBlank() && status != null) {
-                                            DailyAttendance(date = date, status = status)
-                                        } else {
-                                            null
-                                        }
-                                    }
-                                    Employee(id = empId, attendance = attendanceList)
-                                }
-                            }
-                            Job(
-                                id = doc.id,
-                                name = doc.getString("name") ?: "",
-                                type = JobType.valueOf(doc.getString("type") ?: "PARTTIME"),
-                                employerId = doc.getString("employerId") ?: "",
-                                detail = doc.getString("detail") ?: "",
-                                imageUrl = doc.getString("imageUrl") ?: "",
-                                salary = doc.getLong("salary")?.toInt() ?: 0,
-                                insurance = doc.getLong("insurance")?.toInt() ?: 0,
-                                dateUpload = doc.getString("dateUpload") ?: "",
-                                workingHoursStart = doc.getString("workingHoursStart") ?: "",
-                                workingHoursEnd = doc.getString("workingHoursEnd") ?: "",
-                                dateStart = doc.getString("dateStart") ?: "",
-                                dateEnd = doc.getString("dateEnd") ?: "",
-                                employees = employeeList,
-                                employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
-                                companyName = doc.getString("companyName") ?: "Unknown",
-                                categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
-                                attendanceCode = doc.getString("attendanceCode"),
-                                address = Address()
-
-                            )
-                        }
-                        isLoading = false
-                    }
-            } catch (e: Exception) {
-                Log.e("JobManageScreen", "Failed to load jobs or employees", e)
-                isLoading = false
-            }
-        } else {
-            isLoading = false
-        }
-    }
+fun JobManageScreen(
+    navController: NavController,
+    viewModel: JobManageViewModel = viewModel()
+) {
+    val uiState by viewModel.uiState.collectAsState()
+    val employerId = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
     Scaffold(
         topBar = {
             ReusableTopAppBar(
                 title = "Manage Your Jobs",
-                navController = navController,
-                //showBackButton = true
+                navController = navController
             )
         },
         bottomBar = {
@@ -197,7 +72,7 @@ fun JobManageScreen(navController: NavController) {
         },
         containerColor = GreenLight
     ) { padding ->
-        if (isLoading) {
+        if (uiState.isLoading) {
             Box(
                 modifier = Modifier
                     .padding(padding)
@@ -221,63 +96,75 @@ fun JobManageScreen(navController: NavController) {
                 ) {
                     CategoryHeader(
                         title = "Managing",
-                        isSelected = selectedCategory == JobCategory.MANAGING,
-                        onClick = { selectedCategory = JobCategory.MANAGING }
+                        isSelected = uiState.selectedCategory == JobCategory.MANAGING,
+                        onClick = { viewModel.selectCategory(JobCategory.MANAGING) }
                     )
                     CategoryHeader(
                         title = "Incoming",
-                        isSelected = selectedCategory == JobCategory.INCOMING,
-                        onClick = { selectedCategory = JobCategory.INCOMING }
+                        isSelected = uiState.selectedCategory == JobCategory.INCOMING,
+                        onClick = { viewModel.selectCategory(JobCategory.INCOMING) }
                     )
                     CategoryHeader(
                         title = "Ended",
-                        isSelected = selectedCategory == JobCategory.ENDED,
-                        onClick = { selectedCategory = JobCategory.ENDED }
+                        isSelected = uiState.selectedCategory == JobCategory.ENDED,
+                        onClick = { viewModel.selectCategory(JobCategory.ENDED) }
                     )
                 }
 
                 // Job List
-                when (selectedCategory) {
+                when (uiState.selectedCategory) {
                     JobCategory.MANAGING -> JobList(
-                        jobs = managingJobs,
+                        jobs = viewModel.managingJobs,
                         emptyMessage = "No managing jobs.",
-                        onClick = { selectedJob = it },
-                        onAttendanceClick = { selectedAttendanceJob = it }
+                        onClick = { viewModel.selectJob(it) },
+                        onAttendanceClick = { viewModel.selectAttendanceJob(it) }
                     )
                     JobCategory.INCOMING -> JobList(
-                        jobs = incomingJobs,
+                        jobs = viewModel.incomingJobs,
                         emptyMessage = "No incoming jobs.",
-                        onClick = { selectedJob = it },
-                        onAttendanceClick = { selectedAttendanceJob = it }
+                        onClick = { viewModel.selectJob(it) },
+                        onAttendanceClick = { viewModel.selectAttendanceJob(it) }
                     )
                     JobCategory.ENDED -> JobList(
-                        jobs = endedJobs,
+                        jobs = viewModel.endedJobs,
                         emptyMessage = "No ended jobs.",
-                        onClick = { selectedJob = it },
-                        onAttendanceClick = { selectedAttendanceJob = it }
+                        onClick = { viewModel.selectJob(it) },
+                        onAttendanceClick = { viewModel.selectAttendanceJob(it) }
                     )
                 }
             }
         }
 
-        if (selectedJob != null) {
+        if (uiState.selectedJob != null) {
             EmployeeManagementDialog(
-                job = selectedJob!!,
+                job = uiState.selectedJob!!,
                 navController = navController,
-                onDismiss = { selectedJob = null },
-                onUpdateJob = { updatedJob ->
-                    jobs = jobs.map { if (it.id == updatedJob.id) updatedJob else it }
+                employeeStates = uiState.employeeStates,
+                onDismiss = { viewModel.selectJob(null) },
+                onAccept = { employeeId, companyName ->
+                    viewModel.acceptEmployee(uiState.selectedJob!!, employeeId, companyName)
+                },
+                onFire = { employeeId ->
+                    viewModel.fireEmployee(uiState.selectedJob!!, employeeId, employerId)
                 }
             )
         }
 
-        if (selectedAttendanceJob != null) {
+        if (uiState.selectedAttendanceJob != null) {
             AttendanceDialog(
-                job = selectedAttendanceJob!!,
-                onDismiss = { selectedAttendanceJob = null },
-                onUpdateJob = { updatedJob ->
-                    jobs = jobs.map { if (it.id == updatedJob.id) updatedJob else it }
-                }
+                job = uiState.selectedAttendanceJob!!,
+                employeeNames = uiState.employeeNames,
+                todayAttendance = uiState.todayAttendance,
+                onDismiss = { viewModel.selectAttendanceJob(null) },
+                onGenerateQR = { viewModel.generateQRCode(it) }
+            )
+        }
+
+        if (uiState.qrCodeBitmap != null && uiState.qrCodeText != null) {
+            QRCodeDialog(
+                qrCodeBitmap = uiState.qrCodeBitmap!!,
+                qrCodeText = uiState.qrCodeText!!,
+                onDismiss = { viewModel.clearQRCode() }
             )
         }
     }
@@ -347,17 +234,17 @@ fun JobList(
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
-    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now()
+    val formatter = org.threeten.bp.format.DateTimeFormatter.ofPattern("yyyy-MM-dd")
+    val today = org.threeten.bp.LocalDate.now()
     val startDate = try {
-        LocalDate.parse(job.dateStart, formatter)
+        org.threeten.bp.LocalDate.parse(job.dateStart, formatter)
     } catch (e: Exception) {
-        LocalDate.now().minusDays(1)
+        org.threeten.bp.LocalDate.now().minusDays(1)
     }
     val endDate = try {
-        LocalDate.parse(job.dateEnd, formatter)
+        org.threeten.bp.LocalDate.parse(job.dateEnd, formatter)
     } catch (e: Exception) {
-        LocalDate.now().plusDays(1)
+        org.threeten.bp.LocalDate.now().plusDays(1)
     }
     val isActive = !today.isBefore(startDate) && !today.isAfter(endDate)
 
@@ -442,9 +329,8 @@ fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
             )
             if (isActive) {
                 Spacer(modifier = Modifier.height(8.dp))
-
-                        Button(
-                        onClick = onAttendanceClick,
+                Button(
+                    onClick = onAttendanceClick,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = GreenMain,
                         contentColor = Color.White
@@ -459,94 +345,16 @@ fun JobCard(job: Job, onClick: () -> Unit, onAttendanceClick: () -> Unit) {
     }
 }
 
-private fun createNotification(
-    firestore: FirebaseFirestore,
-    employeeId: String,
-    title: String,
-    content: String,
-    from: String
-) {
-    val notification = hashMapOf(
-        "title" to title,
-        "content" to content,
-        "from" to from,
-        "isReaded" to false,
-        "timestamp" to System.currentTimeMillis()
-    )
-
-    firestore.collection("users")
-        .document(employeeId)
-        .collection("notifications")
-        .add(notification)
-        .addOnSuccessListener {
-            Log.d("EmployeeManagementDialog", "Notification created for employee $employeeId")
-        }
-        .addOnFailureListener { e ->
-            Log.e("EmployeeManagementDialog", "Failed to create notification for employee $employeeId", e)
-        }
-}
-
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
 fun EmployeeManagementDialog(
     job: Job,
     navController: NavController,
+    employeeStates: Map<String, String>,
     onDismiss: () -> Unit,
-    onUpdateJob: (Job) -> Unit
+    onAccept: (String, String) -> Unit,
+    onFire: (String) -> Unit
 ) {
-    val firestore = FirebaseFirestore.getInstance()
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val employerId = currentUser?.uid ?: ""
-    var employeeStates by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var employees by remember { mutableStateOf<List<Employee>>(job.employees) }
-
-    LaunchedEffect(job.id) {
-        try {
-            val employeeDocs = firestore.collection("jobs")
-                .document(job.id)
-                .collection("employees")
-                .get()
-                .await()
-            val updatedEmployees = employeeDocs.documents.mapNotNull { empDoc ->
-                val empId = empDoc.getString("id") ?: empDoc.id
-                if (empId.isBlank()) {
-                    Log.w("EmployeeManagementDialog", "Invalid employee document: ${empDoc.data}")
-                    null
-                } else {
-                    val attendanceDocs = firestore.collection("jobs")
-                        .document(job.id)
-                        .collection("employees")
-                        .document(empId)
-                        .collection("attendance")
-                        .get()
-                        .await()
-                    val attendanceList = attendanceDocs.documents.mapNotNull { attDoc ->
-                        val date = attDoc.getString("date") ?: ""
-                        val status = attDoc.getString("status")?.let { AttendanceStatus.valueOf(it) }
-                        if (date.isNotBlank() && status != null) {
-                            DailyAttendance(date = date, status = status)
-                        } else {
-                            null
-                        }
-                    }
-                    Employee(id = empId, attendance = attendanceList)
-                }
-            }
-            val states = mutableMapOf<String, String>()
-            employeeDocs.documents.forEach { empDoc ->
-                val empId = empDoc.getString("id") ?: empDoc.id
-                if (empId.isNotBlank()) {
-                    states[empId] = empDoc.getString("jobState") ?: "APPLYING"
-                }
-            }
-            employees = updatedEmployees
-            employeeStates = states
-            onUpdateJob(job.copy(employees = updatedEmployees))
-        } catch (e: Exception) {
-            Log.e("EmployeeManagementDialog", "Failed to load employees", e)
-        }
-    }
-
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
@@ -568,7 +376,7 @@ fun EmployeeManagementDialog(
                     color = Color.Black
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                if (employees.isEmpty()) {
+                if (job.employees.isEmpty()) {
                     Text(
                         text = "No employees assigned",
                         fontSize = 14.sp,
@@ -582,56 +390,13 @@ fun EmployeeManagementDialog(
                             .fillMaxWidth()
                             .heightIn(max = 300.dp)
                     ) {
-                        items(employees) { employee ->
+                        items(job.employees) { employee ->
                             EmployeeItem(
                                 employee = employee,
                                 state = employeeStates[employee.id] ?: "APPLYING",
                                 onClick = { navController.navigate("profile/${employee.id}") },
-                                onAccept = {
-                                    firestore.collection("jobs")
-                                        .document(job.id)
-                                        .collection("employees")
-                                        .document(employee.id)
-                                        .update("jobState", "WORKING")
-                                        .addOnSuccessListener {
-                                            employeeStates = employeeStates + (employee.id to "WORKING")
-                                            createNotification(
-                                                firestore = firestore,
-                                                employeeId = employee.id,
-                                                title = "Job Application Accepted",
-                                                content = "You have been accepted for the job '${job.name}'.",
-                                                from = job.companyName
-                                            )
-                                            Log.d("EmployeeManagementDialog", "Employee ${employee.id} accepted")
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Log.e("EmployeeManagementDialog", "Failed to accept employee ${employee.id}", e)
-                                        }
-                                },
-                                onFire = {
-                                    firestore.collection("jobs")
-                                        .document(job.id)
-                                        .collection("employees")
-                                        .document(employee.id)
-                                        .update("jobState", "DENIED")
-                                        .addOnSuccessListener {
-                                            val updatedEmployees = employees.filter { it.id != employee.id }
-                                            employees = updatedEmployees
-                                            employeeStates = employeeStates + (employee.id to "DENIED")
-                                            onUpdateJob(job.copy(employees = updatedEmployees))
-                                            createNotification(
-                                                firestore = firestore,
-                                                employeeId = employee.id,
-                                                title = "Job Termination Notice",
-                                                content = "You have been removed from the job '${job.name}'.",
-                                                from = employerId
-                                            )
-                                            Log.d("EmployeeManagementDialog", "Employee ${employee.id} fired")
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Log.e("EmployeeManagementDialog", "Failed to fire employee ${employee.id}", e)
-                                        }
-                                }
+                                onAccept = { onAccept(employee.id, job.companyName) },
+                                onFire = { onFire(employee.id) }
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                         }
@@ -658,75 +423,11 @@ fun EmployeeManagementDialog(
 @Composable
 fun AttendanceDialog(
     job: Job,
+    employeeNames: Map<String, String>,
+    todayAttendance: Map<String, AttendanceStatus>,
     onDismiss: () -> Unit,
-    onUpdateJob: (Job) -> Unit
+    onGenerateQR: (Job) -> Unit
 ) {
-    val firestore = FirebaseFirestore.getInstance()
-    var employees by remember { mutableStateOf<List<Employee>>(job.employees) }
-    var todayAttendance by remember { mutableStateOf<Map<String, AttendanceStatus>>(emptyMap()) }
-    var employeeNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var qrCodeBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var qrCodeText by remember { mutableStateOf<String?>(null) }
-    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val today = LocalDate.now()
-    val todayStr = today.format(formatter)
-
-    LaunchedEffect(job.id) {
-        try {
-            val updatedEmployees = mutableListOf<Employee>()
-            val attendanceMap = mutableMapOf<String, AttendanceStatus>()
-            val nameMap = mutableMapOf<String, String>()
-            for (employee in job.employees) {
-                val userDoc = firestore.collection("users")
-                    .document(employee.id)
-                    .get()
-                    .await()
-                val name = userDoc.getString("name") ?: "Unknown"
-                nameMap[employee.id] = name
-
-                val attendanceDocs = firestore.collection("jobs")
-                    .document(job.id)
-                    .collection("employees")
-                    .document(employee.id)
-                    .collection("attendance")
-                    .get()
-                    .await()
-                val attendanceList = attendanceDocs.documents.mapNotNull { attDoc ->
-                    val date = attDoc.getString("date") ?: ""
-                    val status = attDoc.getString("status")?.let { AttendanceStatus.valueOf(it) }
-                    if (date.isNotBlank() && status != null) {
-                        DailyAttendance(date = date, status = status)
-                    } else {
-                        null
-                    }
-                }
-                val todayAtt = attendanceList.find { it.date == todayStr }
-                attendanceMap[employee.id] = todayAtt?.status ?: AttendanceStatus.ABSENT
-                updatedEmployees.add(employee.copy(attendance = attendanceList))
-            }
-            employees = updatedEmployees
-            todayAttendance = attendanceMap
-            employeeNames = nameMap
-            onUpdateJob(job.copy(employees = updatedEmployees))
-        } catch (e: Exception) {
-            Log.e("AttendanceDialog", "Failed to load attendance or names", e)
-        }
-    }
-
-    fun generateQRCode(text: String): Bitmap {
-        val writer = QRCodeWriter()
-        val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, 200, 200)
-        val width = bitMatrix.width
-        val height = bitMatrix.height
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565)
-        for (x in 0 until width) {
-            for (y in 0 until height) {
-                bitmap.setPixel(x, y, if (bitMatrix[x, y]) Color.Black.hashCode() else Color.White.hashCode())
-            }
-        }
-        return bitmap
-    }
-
     Dialog(onDismissRequest = onDismiss) {
         Card(
             modifier = Modifier
@@ -742,13 +443,13 @@ fun AttendanceDialog(
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "Attendance for ${job.name} - $todayStr",
+                    text = "Attendance for ${job.name} - ${org.threeten.bp.LocalDate.now().format(org.threeten.bp.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"))}",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )
                 Spacer(modifier = Modifier.height(16.dp))
-                if (employees.isEmpty()) {
+                if (job.employees.isEmpty()) {
                     Text(
                         text = "No employees assigned",
                         fontSize = 14.sp,
@@ -762,7 +463,7 @@ fun AttendanceDialog(
                             .fillMaxWidth()
                             .heightIn(max = 300.dp)
                     ) {
-                        items(employees) { employee ->
+                        items(job.employees) { employee ->
                             AttendanceItem(
                                 employee = employee,
                                 employeeName = employeeNames[employee.id] ?: "Unknown",
@@ -778,21 +479,7 @@ fun AttendanceDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Button(
-                        onClick = {
-                            val newCode = UUID.randomUUID().toString()
-                            firestore.collection("jobs")
-                                .document(job.id)
-                                .update("attendanceCode", newCode)
-                                .addOnSuccessListener {
-                                    qrCodeText = newCode
-                                    qrCodeBitmap = generateQRCode(newCode)
-                                    onUpdateJob(job.copy(attendanceCode = newCode))
-                                    Log.d("AttendanceDialog", "Attendance code updated: $newCode")
-                                }
-                                .addOnFailureListener { e ->
-                                    Log.e("AttendanceDialog", "Failed to update attendance code", e)
-                                }
-                        },
+                        onClick = { onGenerateQR(job) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = GreenMain,
                             contentColor = Color.White
@@ -814,14 +501,6 @@ fun AttendanceDialog(
                 }
             }
         }
-    }
-
-    if (qrCodeBitmap != null && qrCodeText != null) {
-        QRCodeDialog(
-            qrCodeBitmap = qrCodeBitmap!!,
-            qrCodeText = qrCodeText!!,
-            onDismiss = { qrCodeBitmap = null; qrCodeText = null }
-        )
     }
 }
 

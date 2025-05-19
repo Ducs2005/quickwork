@@ -3,7 +3,6 @@ package com.example.quickwork.ui.screens
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.Image
@@ -38,23 +37,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import coil.compose.rememberAsyncImagePainter
 import com.example.quickwork.R
-import com.example.quickwork.data.models.Address
+import com.example.quickwork.data.models.Category
 import com.example.quickwork.data.models.Job
 import com.example.quickwork.data.models.JobType
-import com.example.quickwork.data.models.Category
-import com.example.quickwork.data.models.User
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
+import com.example.quickwork.ui.viewmodels.JobSearchViewModel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import java.util.*
-import kotlin.math.*
+import kotlin.math.ceil
+import kotlin.math.min
+// ViewModel Factory to pass initial parameters
+import androidx.lifecycle.ViewModelProvider
 
 private val GreenMain = Color(0xFF4CAF50)
 
@@ -71,41 +68,27 @@ enum class SortOption(val displayName: String) {
 // Data class to hold job and its distance
 data class JobWithDistance(val job: Job, val distance: Double?)
 
-// Utility function to calculate distance using Haversine formula
-private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-    val earthRadius = 6371.0 // Earth's radius in kilometers
-    val dLat = Math.toRadians(lat2 - lat1)
-    val dLon = Math.toRadians(lon2 - lon1)
-    val a = sin(dLat / 2) * sin(dLat / 2) +
-            cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
-            sin(dLon / 2) * sin(dLon / 2)
-    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-    return earthRadius * c
-}
-
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun JobSearchResultsScreen(
     navController: NavController,
     keyword: String,
-    selectedJobType: JobType? = null
+    selectedJobType: JobType? = null,
+    viewModel: JobSearchViewModel = viewModel(factory = JobSearchViewModelFactory(keyword, selectedJobType))
 ) {
-    val firestore = FirebaseFirestore.getInstance()
-    val auth = FirebaseAuth.getInstance()
-    var searchKeyword by remember { mutableStateOf(keyword) }
-    var jobsWithDistance by remember { mutableStateOf<List<JobWithDistance>>(emptyList()) }
-    var categories by remember { mutableStateOf<List<Category>>(emptyList()) }
-    var selectedCategoryIds by remember { mutableStateOf<List<String>>(emptyList()) }
-    var selectedJobTypes by remember { mutableStateOf<List<JobType>>(selectedJobType?.let { listOf(it) } ?: JobType.values().toList()) }
-    var startDate by remember { mutableStateOf<String?>(null) }
-    var endDate by remember { mutableStateOf<String?>(null) }
-    var startTime by remember { mutableStateOf<String?>(null) }
-    var sortOption by remember { mutableStateOf(SortOption.SALARY_DESC) }
-    var isLoading by remember { mutableStateOf(true) }
+    val jobsWithDistance by viewModel.jobsWithDistance.collectAsState()
+    val categories by viewModel.categories.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val searchKeyword by viewModel.searchKeyword.collectAsState()
+    val selectedCategoryIds by viewModel.selectedCategoryIds.collectAsState()
+    val selectedJobTypes by viewModel.selectedJobTypes.collectAsState()
+    val startDate by viewModel.startDate.collectAsState()
+    val endDate by viewModel.endDate.collectAsState()
+    val startTime by viewModel.startTime.collectAsState()
+    val sortOption by viewModel.sortOption.collectAsState()
     var showFilterSheet by remember { mutableStateOf(false) }
     var currentPage by remember { mutableStateOf(1) }
-    var userLocation by remember { mutableStateOf<Address?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val sheetState = rememberModalBottomSheetState()
 
@@ -115,149 +98,6 @@ fun JobSearchResultsScreen(
         fromIndex = (currentPage - 1) * jobsPerPage,
         toIndex = min(currentPage * jobsPerPage, jobsWithDistance.size)
     )
-
-    val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-
-    // Load current user's location
-    LaunchedEffect(Unit) {
-        val userId = auth.currentUser?.uid ?: return@LaunchedEffect
-        try {
-            val userDoc = firestore.collection("users").document(userId).get().await()
-            val user = userDoc.toObject(User::class.java)
-            userLocation = user?.address
-        } catch (e: Exception) {
-            Log.e("JobSearchResultsScreen", "Failed to load user location", e)
-        }
-    }
-
-    // Load categories
-    LaunchedEffect(Unit) {
-        try {
-            val querySnapshot = firestore.collection("category").get().await()
-            categories = querySnapshot.documents.mapNotNull { doc ->
-                try {
-                    Category(
-                        id = doc.id,
-                        name = doc.getString("name") ?: ""
-                    )
-                } catch (e: Exception) {
-                    Log.w("JobSearchResultsScreen", "Error parsing category ${doc.id}", e)
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("JobSearchResultsScreen", "Failed to load categories", e)
-        }
-    }
-
-    // Load and filter jobs
-    LaunchedEffect(searchKeyword, selectedCategoryIds, selectedJobTypes, startDate, endDate, startTime, sortOption, userLocation) {
-        isLoading = true
-        currentPage = 1 // Reset to page 1 on filter/sort change
-        try {
-            val querySnapshot = firestore.collection("jobs").get().await()
-            val allJobs = querySnapshot.documents.mapNotNull { doc ->
-                try {
-                    Job(
-                        id = doc.id,
-                        name = doc.getString("name") ?: "",
-                        type = doc.getString("type")?.let { JobType.valueOf(it) } ?: JobType.PARTTIME,
-                        employerId = doc.getString("employerId") ?: "",
-                        detail = doc.getString("detail") ?: "",
-                        imageUrl = doc.getString("imageUrl") ?: "",
-                        salary = doc.getLong("salary")?.toInt() ?: 0,
-                        insurance = doc.getLong("insurance")?.toInt() ?: 0,
-                        dateUpload = doc.getString("dateUpload") ?: "",
-                        workingHoursStart = doc.getString("workingHoursStart") ?: "",
-                        workingHoursEnd = doc.getString("workingHoursEnd") ?: "",
-                        dateStart = doc.getString("dateStart") ?: "",
-                        dateEnd = doc.getString("dateEnd") ?: "",
-                        employees = emptyList(),
-                        employeeRequired = doc.getLong("employeeRequired")?.toInt() ?: 0,
-                        companyName = doc.getString("companyName") ?: "Unknown",
-                        categoryIds = doc.get("categoryIds") as? List<String> ?: emptyList(),
-                        address = doc.get("address")?.let { addressMap ->
-                            Address(
-                                latitude = (addressMap as Map<*, *>)["latitude"] as? Double ?: 0.0,
-                                longitude = addressMap["longitude"] as? Double ?: 0.0,
-                                address = addressMap["address"] as? String ?: "",
-                                timestamp = addressMap["timestamp"] as? Long ?: 0L
-                            )
-                        } ?: Address()
-                    )
-                } catch (e: Exception) {
-                    Log.w("JobSearchResultsScreen", "Error parsing job ${doc.id}", e)
-                    null
-                }
-            }
-
-            val filteredJobs = allJobs.filter { job ->
-                val keywordLower = searchKeyword.lowercase()
-                val nameMatch = job.name.lowercase().contains(keywordLower)
-                val detailMatch = job.detail.lowercase().contains(keywordLower)
-                val keywordPass = searchKeyword.isBlank() || nameMatch || detailMatch
-                val categoryPass = selectedCategoryIds.isEmpty() || job.categoryIds.any { it in selectedCategoryIds }
-                val typePass = selectedJobType?.let { job.type == it } ?: (job.type in selectedJobTypes)
-                val startDatePass = startDate?.let { filterDate ->
-                    try {
-                        val jobStartDate = LocalDate.parse(job.dateStart, dateFormatter)
-                        val filterStartDate = LocalDate.parse(filterDate, dateFormatter)
-                        !jobStartDate.isBefore(filterStartDate)
-                    } catch (e: Exception) {
-                        false
-                    }
-                } ?: true
-                val endDatePass = endDate?.let { filterDate ->
-                    try {
-                        val jobEndDate = LocalDate.parse(job.dateEnd, dateFormatter)
-                        val filterEndDate = LocalDate.parse(filterDate, dateFormatter)
-                        !jobEndDate.isAfter(filterEndDate)
-                    } catch (e: Exception) {
-                        false
-                    }
-                } ?: true
-                val timePass = startTime?.let { filterTime ->
-                    try {
-                        val jobStartTime = LocalTime.parse(job.workingHoursStart, timeFormatter)
-                        val filterStartTime = LocalTime.parse(filterTime, timeFormatter)
-                        !jobStartTime.isBefore(filterStartTime)
-                    } catch (e: Exception) {
-                        false
-                    }
-                } ?: true
-                keywordPass && categoryPass && typePass && startDatePass && endDatePass && timePass
-            }
-
-            // Calculate distance for each job
-            jobsWithDistance = filteredJobs.map { job ->
-                val distance = userLocation?.let { userLoc ->
-                    if (job.address.latitude != 0.0 && job.address.longitude != 0.0) {
-                        calculateDistance(
-                            userLoc.latitude,
-                            userLoc.longitude,
-                            job.address.latitude,
-                            job.address.longitude
-                        )
-                    } else {
-                        null
-                    }
-                }
-                JobWithDistance(job, distance)
-            }.sortedWith(when (sortOption) {
-                SortOption.SALARY_ASC -> compareBy { it.job.salary }
-                SortOption.SALARY_DESC -> compareByDescending { it.job.salary }
-                SortOption.DATE_NEWEST -> compareByDescending { it.job.dateUpload }
-                SortOption.DATE_OLDEST -> compareBy { it.job.dateUpload }
-                SortOption.NAME_ASC -> compareBy { it.job.name.lowercase() }
-                SortOption.DISTANCE_ASC -> compareBy(nullsLast()) { it.distance }
-            })
-        } catch (e: Exception) {
-            Log.e("JobSearchResultsScreen", "Failed to load jobs", e)
-        } finally {
-            isLoading = false
-        }
-    }
 
     val filterCount = selectedCategoryIds.size +
             (if (selectedJobTypes.size < JobType.values().size) selectedJobTypes.size else 0) +
@@ -307,7 +147,7 @@ fun JobSearchResultsScreen(
         ) {
             OutlinedTextField(
                 value = searchKeyword,
-                onValueChange = { searchKeyword = it },
+                onValueChange = { viewModel.updateSearchKeyword(it) },
                 label = { Text("Search jobs") },
                 leadingIcon = {
                     Icon(Icons.Default.Search, contentDescription = "Search", tint = GreenMain)
@@ -448,11 +288,12 @@ fun JobSearchResultsScreen(
                                         FilterChip(
                                             selected = isSelected,
                                             onClick = {
-                                                selectedCategoryIds = if (isSelected) {
+                                                val newCategoryIds = if (isSelected) {
                                                     selectedCategoryIds - category.id
                                                 } else {
                                                     selectedCategoryIds + category.id
                                                 }
+                                                viewModel.updateSelectedCategoryIds(newCategoryIds)
                                             },
                                             label = { Text(category.name, fontSize = 14.sp) },
                                             shape = RoundedCornerShape(20.dp),
@@ -488,11 +329,12 @@ fun JobSearchResultsScreen(
                                     FilterChip(
                                         selected = isSelected,
                                         onClick = {
-                                            selectedJobTypes = if (isSelected) {
+                                            val newJobTypes = if (isSelected) {
                                                 selectedJobTypes - type
                                             } else {
                                                 selectedJobTypes + type
                                             }
+                                            viewModel.updateSelectedJobTypes(newJobTypes)
                                         },
                                         label = { Text(type.name, fontSize = 14.sp) },
                                         shape = RoundedCornerShape(20.dp),
@@ -522,7 +364,8 @@ fun JobSearchResultsScreen(
                                 DatePickerDialog(
                                     context,
                                     { _, year, month, dayOfMonth ->
-                                        startDate = String.format("%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                        val date = String.format("%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                        viewModel.updateStartDate(date)
                                     },
                                     calendar.get(Calendar.YEAR),
                                     calendar.get(Calendar.MONTH),
@@ -536,7 +379,8 @@ fun JobSearchResultsScreen(
                                 DatePickerDialog(
                                     context,
                                     { _, year, month, dayOfMonth ->
-                                        endDate = String.format("%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                        val date = String.format("%04d-%02d-%02d", year, month + 1, dayOfMonth)
+                                        viewModel.updateEndDate(date)
                                     },
                                     calendar.get(Calendar.YEAR),
                                     calendar.get(Calendar.MONTH),
@@ -549,7 +393,8 @@ fun JobSearchResultsScreen(
                                 TimePickerDialog(
                                     context,
                                     { _, hour, minute ->
-                                        startTime = String.format("%02d:%02d", hour, minute)
+                                        val time = String.format("%02d:%02d", hour, minute)
+                                        viewModel.updateStartTime(time)
                                     },
                                     8, 0, true
                                 ).show()
@@ -585,7 +430,7 @@ fun JobSearchResultsScreen(
                                     ),
                                     trailingIcon = {
                                         if (startDate != null) {
-                                            IconButton(onClick = { startDate = null }) {
+                                            IconButton(onClick = { viewModel.updateStartDate(null) }) {
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowDropUp,
                                                     contentDescription = "Clear Start Date",
@@ -614,7 +459,7 @@ fun JobSearchResultsScreen(
                                     ),
                                     trailingIcon = {
                                         if (endDate != null) {
-                                            IconButton(onClick = { endDate = null }) {
+                                            IconButton(onClick = { viewModel.updateEndDate(null) }) {
                                                 Icon(
                                                     imageVector = Icons.Default.ArrowDropUp,
                                                     contentDescription = "Clear End Date",
@@ -644,7 +489,7 @@ fun JobSearchResultsScreen(
                                 ),
                                 trailingIcon = {
                                     if (startTime != null) {
-                                        IconButton(onClick = { startTime = null }) {
+                                        IconButton(onClick = { viewModel.updateStartTime(null) }) {
                                             Icon(
                                                 imageVector = Icons.Default.ArrowDropUp,
                                                 contentDescription = "Clear Time",
@@ -697,7 +542,7 @@ fun JobSearchResultsScreen(
                                         DropdownMenuItem(
                                             text = { Text(option.displayName, fontSize = 14.sp) },
                                             onClick = {
-                                                sortOption = option
+                                                viewModel.updateSortOption(option)
                                                 expandedSort = false
                                             },
                                             modifier = Modifier
@@ -933,5 +778,20 @@ fun PaginationControl(
                 fontWeight = FontWeight.Medium
             )
         }
+    }
+}
+
+
+
+class JobSearchViewModelFactory(
+    private val keyword: String,
+    private val selectedJobType: JobType?
+) : ViewModelProvider.Factory {
+    @Suppress("UNCHECKED_CAST")
+    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+        if (modelClass.isAssignableFrom(JobSearchViewModel::class.java)) {
+            return JobSearchViewModel(initialKeyword = keyword, initialJobType = selectedJobType) as T
+        }
+        throw IllegalArgumentException("Unknown ViewModel class")
     }
 }

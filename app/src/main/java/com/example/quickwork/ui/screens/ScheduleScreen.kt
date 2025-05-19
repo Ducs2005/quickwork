@@ -1,7 +1,6 @@
 package com.example.quickwork.ui.screens
 
 import android.os.Build
-import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
@@ -22,149 +21,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.quickwork.ScanActivity
-import com.example.quickwork.data.models.Address
 import com.example.quickwork.data.models.Job
-import com.example.quickwork.data.models.JobType
 import com.example.quickwork.ui.components.BottomNavigation
 import com.example.quickwork.ui.components.Header
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.tasks.await
+import com.example.quickwork.ui.viewmodels.ScheduleViewModel
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import java.time.temporal.WeekFields
 
 private val GreenMain = Color(0xFF4CAF50)
 
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScheduleScreen(navController: NavController) {
-    val currentUser = FirebaseAuth.getInstance().currentUser
-    val userId = currentUser?.uid
-    val firestore = FirebaseFirestore.getInstance()
-
-    var jobs by remember { mutableStateOf<List<Job>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
-    var currentWeekStart by remember { mutableStateOf(LocalDate.now().with(WeekFields.ISO.firstDayOfWeek)) }
-    var scanResult by remember { mutableStateOf<String?>(null) }
-    var scanFeedback by remember { mutableStateOf<String?>(null) }
-    var selectedJob by remember { mutableStateOf<Job?>(null) }
+fun ScheduleScreen(
+    navController: NavController,
+    viewModel: ScheduleViewModel = viewModel()
+) {
+    val jobs by viewModel.jobs.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val currentWeekStart by viewModel.currentWeekStart.collectAsState()
+    val scanFeedback by viewModel.scanFeedback.collectAsState()
 
     // Formatter for parsing and displaying dates
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val displayFormatter = DateTimeFormatter.ofPattern("MMM d, yyyy")
-
-    // Fetch user's working jobs
-    LaunchedEffect(userId) {
-        if (userId != null) {
-            try {
-                // Get jobList from user document
-                val userDoc = firestore.collection("users").document(userId).get().await()
-                val jobList = userDoc.get("jobList") as? List<String> ?: emptyList()
-
-                // Fetch job details for jobs where user is WORKING
-                val workingJobs = mutableListOf<Job>()
-                for (jobId in jobList) {
-                    try {
-                        val employeeDoc = firestore.collection("jobs")
-                            .document(jobId)
-                            .collection("employees")
-                            .document(userId)
-                            .get()
-                            .await()
-                        val jobState = employeeDoc.getString("jobState")
-                        if (jobState == "WORKING") {
-                            val jobDoc = firestore.collection("jobs").document(jobId).get().await()
-                            if (jobDoc.exists()) {
-                                workingJobs.add(
-                                    Job(
-                                        id = jobDoc.id,
-                                        name = jobDoc.getString("name") ?: "",
-                                        type = try {
-                                            jobDoc.getString("type")?.let { enumValueOf<JobType>(it) } ?: JobType.PARTTIME
-                                        } catch (e: IllegalArgumentException) {
-                                            JobType.PARTTIME
-                                        },
-                                        employerId = jobDoc.getString("employerId") ?: "",
-                                        detail = jobDoc.getString("detail") ?: "",
-                                        imageUrl = jobDoc.getString("imageUrl") ?: "",
-                                        salary = jobDoc.getLong("salary")?.toInt() ?: 0,
-                                        insurance = jobDoc.getLong("insurance")?.toInt() ?: 0,
-                                        dateUpload = jobDoc.getString("dateUpload") ?: "",
-                                        workingHoursStart = jobDoc.getString("workingHoursStart") ?: "",
-                                        workingHoursEnd = jobDoc.getString("workingHoursEnd") ?: "",
-                                        dateStart = jobDoc.getString("dateStart") ?: "",
-                                        dateEnd = jobDoc.getString("dateEnd") ?: "",
-                                        employees = emptyList(),
-                                        employeeRequired = jobDoc.getLong("employeeRequired")?.toInt() ?: 0,
-                                        companyName = jobDoc.getString("companyName") ?: "Unknown",
-                                        categoryIds = jobDoc.get("categoryIds") as? List<String> ?: emptyList(),
-                                        attendanceCode = jobDoc.getString("attendanceCode"),
-                                        address = Address()
-
-                                    )
-                                )
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.w("ScheduleScreen", "Error fetching job $jobId", e)
-                    }
-                }
-                jobs = workingJobs
-                isLoading = false
-            } catch (e: Exception) {
-                Log.e("ScheduleScreen", "Failed to load jobs", e)
-                isLoading = false
-            }
-        } else {
-            isLoading = false
-        }
-    }
-
-    // Process QR scan result
-    LaunchedEffect(scanResult, selectedJob) {
-        if (scanResult != null && selectedJob != null) {
-            if (scanResult == selectedJob!!.attendanceCode) {
-                try {
-                    val todayStr = LocalDate.now().format(dateFormatter)
-                    val currentTime = LocalTime.now()
-                    val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
-                    val startTime = try {
-                        LocalTime.parse(selectedJob!!.workingHoursStart, timeFormatter)
-                    } catch (e: Exception) {
-                        LocalTime.now()
-                    }
-                    val status = if (currentTime.isAfter(startTime)) "LATE" else "PRESENT"
-                    val attendanceData = hashMapOf(
-                        "date" to todayStr,
-                        "status" to status
-                    )
-                    firestore.collection("jobs")
-                        .document(selectedJob!!.id)
-                        .collection("employees")
-                        .document(userId!!)
-                        .collection("attendance")
-                        .document(todayStr)
-                        .set(attendanceData)
-                        .await()
-                    scanFeedback = "Attendance marked as $status"
-                    Log.d("ScheduleScreen", "Attendance updated for job ${selectedJob!!.id}: $status")
-                } catch (e: Exception) {
-                    scanFeedback = "Failed to mark attendance"
-                    Log.e("ScheduleScreen", "Failed to update attendance", e)
-                }
-            } else {
-                scanFeedback = "Invalid QR code"
-                Log.w("ScheduleScreen", "Invalid QR code scanned: $scanResult")
-            }
-            scanResult = null
-            selectedJob = null
-        }
-    }
 
     // Calculate week range
     val weekEnd = currentWeekStart.plusDays(6)
@@ -172,10 +56,8 @@ fun ScheduleScreen(navController: NavController) {
 
     Scaffold(
         topBar = { Header(navController) },
-
-        bottomBar = { BottomNavigation(navController, currentScreen = "schedule") },
-
-        ) { padding ->
+        bottomBar = { BottomNavigation(navController, currentScreen = "schedule") }
+    ) { padding ->
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -198,7 +80,7 @@ fun ScheduleScreen(navController: NavController) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(onClick = { currentWeekStart = currentWeekStart.minusWeeks(1) }) {
+                IconButton(onClick = { viewModel.setWeekStart(currentWeekStart.minusWeeks(1)) }) {
                     Icon(
                         imageVector = Icons.Filled.ChevronLeft,
                         contentDescription = "Previous Week",
@@ -211,7 +93,7 @@ fun ScheduleScreen(navController: NavController) {
                     fontWeight = FontWeight.Bold,
                     color = Color.Black
                 )
-                IconButton(onClick = { currentWeekStart = currentWeekStart.plusWeeks(1) }) {
+                IconButton(onClick = { viewModel.setWeekStart(currentWeekStart.plusWeeks(1)) }) {
                     Icon(
                         imageVector = Icons.Filled.ChevronRight,
                         contentDescription = "Next Week",
@@ -252,7 +134,6 @@ fun ScheduleScreen(navController: NavController) {
                                 val endDate = LocalDate.parse(job.dateEnd, dateFormatter)
                                 !currentDay.isBefore(startDate) && !currentDay.isAfter(endDate)
                             } catch (e: Exception) {
-                                Log.w("ScheduleScreen", "Invalid date format for job ${job.id}", e)
                                 false
                             }
                         }
@@ -260,11 +141,8 @@ fun ScheduleScreen(navController: NavController) {
                             day = currentDay,
                             jobs = dayJobs,
                             formatter = displayFormatter,
-                            onTakeAttendance = { job ->
-                                selectedJob = job
-                            },
-                            onScanResult = { result ->
-                                scanResult = result
+                            onTakeAttendance = { job, qrResult ->
+                                viewModel.selectJobAndScan(job, qrResult)
                             }
                         )
                     }
@@ -273,10 +151,10 @@ fun ScheduleScreen(navController: NavController) {
         }
     }
 
-    if (scanFeedback != null) {
+    scanFeedback?.let {
         FeedbackDialog(
-            message = scanFeedback!!,
-            onDismiss = { scanFeedback = null }
+            message = it,
+            onDismiss = { viewModel.clearFeedback() }
         )
     }
 }
@@ -287,8 +165,7 @@ fun DayScheduleItem(
     day: LocalDate,
     jobs: List<Job>,
     formatter: DateTimeFormatter,
-    onTakeAttendance: (Job) -> Unit,
-    onScanResult: (String?) -> Unit
+    onTakeAttendance: (Job, String?) -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -319,8 +196,7 @@ fun DayScheduleItem(
                     JobItem(
                         job = job,
                         isToday = day == LocalDate.now(),
-                        onTakeAttendance = { onTakeAttendance(job) },
-                        onScanResult = onScanResult
+                        onTakeAttendance = { qrResult -> onTakeAttendance(job, qrResult) }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
@@ -334,8 +210,7 @@ fun DayScheduleItem(
 fun JobItem(
     job: Job,
     isToday: Boolean,
-    onTakeAttendance: () -> Unit,
-    onScanResult: (String?) -> Unit
+    onTakeAttendance: (String?) -> Unit
 ) {
     val context = LocalContext.current
 
@@ -356,16 +231,9 @@ fun JobItem(
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             val qrResult = result.data?.getStringExtra("qr_result")
-            if (qrResult != null) {
-                onTakeAttendance() // Set selectedJob
-                onScanResult(qrResult) // Set scanResult
-            } else {
-                Log.w("JobItem", "No QR code result received")
-                onScanResult(null)
-            }
+            onTakeAttendance(qrResult)
         } else {
-            Log.w("JobItem", "ScanActivity cancelled or failed")
-            onScanResult(null)
+            onTakeAttendance(null)
         }
     }
 
@@ -375,8 +243,6 @@ fun JobItem(
     ) { isGranted ->
         if (isGranted) {
             scanLauncher.launch(android.content.Intent(context, ScanActivity::class.java))
-        } else {
-            Log.e("JobItem", "Camera permission denied")
         }
     }
 

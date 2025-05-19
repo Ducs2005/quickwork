@@ -2,7 +2,6 @@ package com.example.quickwork.ui.screens
 
 import android.annotation.SuppressLint
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,13 +22,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import com.example.quickwork.data.models.JobState
 import com.example.quickwork.ui.components.BottomNavigation
 import com.example.quickwork.ui.components.Header
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.tasks.await
+import com.example.quickwork.ui.viewmodels.JobStateViewModel
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -42,107 +40,22 @@ private val GrayText = Color(0xFF616161) // Gray for secondary text
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JobStateScreen(navController: NavHostController) {
-    val firestore = FirebaseFirestore.getInstance()
-    val userId = FirebaseAuth.getInstance().currentUser?.uid
-    var jobList by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
-    var employeeStates by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
-    var loading by remember { mutableStateOf(true) }
-    var selectedJobId by remember  { mutableStateOf<String?>(null) }
-    var attendanceList by remember { mutableStateOf<List<Map<String, Any>>>(emptyList()) }
+fun JobStateScreen(
+    navController: NavHostController,
+    viewModel: JobStateViewModel = viewModel()
+) {
+    val jobList by viewModel.jobList.collectAsState()
+    val employeeStates by viewModel.employeeStates.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val selectedJobId by viewModel.selectedJobId.collectAsState()
+    val attendanceList by viewModel.attendanceList.collectAsState()
+    val receiveSalary by viewModel.receiveSalary.collectAsState()
     var selectedTabIndex by remember { mutableStateOf(0) }
-    var receiveSalary by remember { mutableStateOf(false) }
 
     // Formatter for parsing dates and times
     val dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd")
     val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
     val displayDateFormatter = DateTimeFormatter.ofPattern("MMM dd, yyyy") // e.g., Jan 01, 2025
-
-    // Fetch user's jobs and states, update ENDED state if dateEnd is past
-    LaunchedEffect(userId) {
-        if (userId != null) {
-            try {
-                val userDoc = firestore.collection("users").document(userId).get().await()
-                val jobIds = userDoc.get("jobList") as? List<String> ?: emptyList()
-                val fetchedJobs = mutableListOf<Map<String, Any>>()
-                val fetchedStates = mutableMapOf<String, String>()
-                for (jobId in jobIds) {
-                    val jobDoc = firestore.collection("jobs").document(jobId).get().await()
-                    if (jobDoc.exists()) {
-                        jobDoc.data?.let { jobData ->
-                            fetchedJobs.add(jobData)
-                            val employeeDoc = firestore.collection("jobs")
-                                .document(jobId)
-                                .collection("employees")
-                                .document(userId)
-                                .get()
-                                .await()
-                            var state = if (employeeDoc.exists()) {
-                                employeeDoc.getString("jobState") ?: "UNKNOWN"
-                            } else {
-                                "NOT_APPLIED"
-                            }
-                            val dateEndStr = jobData["dateEnd"] as? String
-                            if (dateEndStr != null && state != JobState.ENDED.name) {
-                                try {
-                                    val dateEnd = LocalDate.parse(dateEndStr, dateFormatter)
-                                    val today = LocalDate.now()
-                                    if (dateEnd.isBefore(today)) {
-                                        firestore.collection("jobs")
-                                            .document(jobId)
-                                            .collection("employees")
-                                            .document(userId)
-                                            .set(mapOf("jobState" to JobState.ENDED.name))
-                                            .await()
-                                        state = JobState.ENDED.name
-                                        Log.d("JobStateScreen", "Updated job $jobId to ENDED")
-                                    }
-                                } catch (e: Exception) {
-                                    Log.w("JobStateScreen", "Invalid dateEnd format for job $jobId", e)
-                                }
-                            }
-                            fetchedStates[jobId] = state
-                        }
-                    }
-                }
-                jobList = fetchedJobs
-                employeeStates = fetchedStates
-            } catch (e: Exception) {
-                Log.e("JobStateScreen", "Failed to load jobs or employee states", e)
-            } finally {
-                loading = false
-            }
-        } else {
-            loading = false
-        }
-    }
-
-    // Fetch attendance and receiveSalary when a job is selected
-    LaunchedEffect(selectedJobId) {
-        if (selectedJobId != null && userId != null) {
-            try {
-                val attendanceDocs = firestore.collection("jobs")
-                    .document(selectedJobId!!)
-                    .collection("employees")
-                    .document(userId)
-                    .collection("attendance")
-                    .get()
-                    .await()
-                attendanceList = attendanceDocs.documents.mapNotNull { it.data }
-                val employeeDoc = firestore.collection("jobs")
-                    .document(selectedJobId!!)
-                    .collection("employees")
-                    .document(userId)
-                    .get()
-                    .await()
-                receiveSalary = employeeDoc.getBoolean("receiveSalary") ?: false
-            } catch (e: Exception) {
-                Log.e("JobScreen", "Failed to load attendance or receiveSalary", e)
-                attendanceList = emptyList()
-                receiveSalary = false
-            }
-        }
-    }
 
     // Filter jobs by tab
     val applyingJobs = jobList.filter { employeeStates[it["id"] as? String] == JobState.APPLYING.name }
@@ -184,7 +97,7 @@ fun JobStateScreen(navController: NavHostController) {
                 }
             }
 
-            if (loading) {
+            if (isLoading) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
@@ -210,7 +123,7 @@ fun JobStateScreen(navController: NavHostController) {
                         JobCard(
                             job = job,
                             state = employeeStates[jobId] ?: "UNKNOWN",
-                            onClick = { selectedJobId = jobId },
+                            onClick = { viewModel.selectJob(jobId) },
                             dateFormatter = displayDateFormatter
                         )
                     }
@@ -230,8 +143,7 @@ fun JobStateScreen(navController: NavHostController) {
                 }
             }
 
-            val selectedId = selectedJobId
-            if (selectedId != null) {
+            if (selectedJobId != null) {
                 AttendanceDialog(
                     attendanceList = attendanceList,
                     job = jobList.find { it["id"] as? String == selectedJobId },
@@ -239,41 +151,12 @@ fun JobStateScreen(navController: NavHostController) {
                     receiveSalary = receiveSalary,
                     dateFormatter = displayDateFormatter,
                     onClaimSalary = { stars, comment ->
-                        if (userId != null && selectedId != null) {
-                            val job = jobList.find { it["id"] as? String == selectedId }
-                            val jobName = job?.get("name") as? String ?: "Unknown"
-                            val employerId = job?.get("employerId") as? String ?: "system"
-                            val ratingData = mapOf(
-                                "stars" to stars,
-                                "comment" to comment,
-                                "jobName" to jobName,
-                                "date" to LocalDate.now().format(dateFormatter),
-                                "ratedId" to userId
-                            )
-                            firestore.collection("users")
-                                .document(employerId)
-                                .collection("rated")
-                                .add(ratingData)
-                                .addOnSuccessListener {
-                                    firestore.collection("jobs")
-                                        .document(selectedId)
-                                        .collection("employees")
-                                        .document(userId)
-                                        .update("receiveSalary", true)
-                                        .addOnSuccessListener {
-                                            receiveSalary = true
-                                            Log.d("JobStateScreen", "Salary claimed and rating saved for job $selectedId")
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Log.e("JobStateScreen", "Failed to claim salary", e)
-                                        }
-                                }
-                                .addOnFailureListener { e ->
-                                    Log.e("JobStateScreen", "Failed to save rating", e)
-                                }
-                        }
+                        val job = jobList.find { it["id"] as? String == selectedJobId }
+                        val jobName = job?.get("name") as? String ?: "Unknown"
+                        val employerId = job?.get("employerId") as? String ?: "system"
+                        viewModel.claimSalary(selectedJobId!!, stars, comment, jobName, employerId)
                     },
-                    onDismiss = { selectedJobId = null }
+                    onDismiss = { viewModel.selectJob(null) }
                 )
             }
         }
@@ -329,14 +212,6 @@ fun JobCard(job: Map<String, Any>, state: String, onClick: () -> Unit, dateForma
                 color = GrayText,
                 fontSize = 14.sp
             )
-//            Row(
-//                modifier = Modifier.fillMaxWidth(),
-//                horizontalArrangement = Arrangement.spacedBy(16.dp),
-//                verticalAlignment = Alignment.CenterVertically
-//            ) {
-//
-//
-//            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.CalendarToday,
@@ -344,7 +219,7 @@ fun JobCard(job: Map<String, Any>, state: String, onClick: () -> Unit, dateForma
                     tint = GreenMain,
                     modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "$dateStart → $dateEnd",
                     style = MaterialTheme.typography.bodySmall,
@@ -434,7 +309,8 @@ fun AttendanceDialog(
                     }
                 }
             } catch (e: Exception) {
-                Log.w("AttendanceDialog", "Invalid time format", e)
+                // Log removed to avoid dependency on android.util.Log
+                // Consider using a logging library or custom logger in production
             }
         }
     }
